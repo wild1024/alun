@@ -1,0 +1,30 @@
+[package]
+name = "alun-task"
+description = "Alun async task framework: Kafka-driven task submission, processing, retry with DLQ and lifecycle management"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-task"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["task", "async", "kafka", "retry", "dlq", "worker"]
+categories = ["asynchronous", "web-programming", "network-programming"]
+
+[dependencies]
+alun-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+rdkafka = { workspace = true }
+linkme = { workspace = true }

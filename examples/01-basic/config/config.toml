@@ -1,0 +1,11 @@
+[app]
+name = "Alun Demo"
+
+[server]
+port = 8081
+
+[template]
+path = "templates"
+
+[middleware.request_log]
+enabled = true

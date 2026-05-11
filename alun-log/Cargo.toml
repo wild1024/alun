@@ -1,0 +1,21 @@
+[package]
+name = "alun-log"
+description = "Alun logging: tracing initialization from config with file and console output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-log"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["logging", "tracing", "web", "framework"]
+categories = ["development-tools::debugging", "web-programming"]
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "json", "fmt"] }
+tracing-appender = "0.2"
+serde = { workspace = true }
+alun-config = { workspace = true }

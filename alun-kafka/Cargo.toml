@@ -1,0 +1,25 @@
+[package]
+name = "alun-kafka"
+description = "Alun Kafka integration: Producer and Consumer with unified API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-kafka"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["kafka", "messaging", "streaming", "web", "framework"]
+categories = ["network-programming", "web-programming", "asynchronous"]
+
+[dependencies]
+alun-core = { workspace = true }
+alun-config = { workspace = true }
+rdkafka = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }

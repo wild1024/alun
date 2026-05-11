@@ -1,0 +1,28 @@
+[package]
+name = "alun-plugin"
+description = "Alun plugins: notification (email), cache, async-task, scheduler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-plugin"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["plugin", "notification", "email", "scheduler", "web", "framework"]
+categories = ["web-programming", "email"]
+
+[dependencies]
+alun-core = { workspace = true }
+alun-config = { workspace = true }
+alun-cache = { workspace = true }
+alun-utils = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = { workspace = true }
+lettre = { version = "0.11", default-features = false, features = ["builder", "rustls-tls", "smtp-transport"] }

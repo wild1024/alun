@@ -1,0 +1,76 @@
+[workspace]
+resolver = "2"
+members = [
+    "alun-core",
+    "alun-macros",
+    "alun-web",
+    "alun-db",
+    "alun-template",
+    "alun-cache",
+    "alun-config",
+    "alun-log",
+    "alun-utils",
+    "alun-plugin",
+    "alun-kafka",
+    "alun-task",
+    "alun-fs",
+    "alun",
+]
+exclude = [
+    "examples/*",
+    "target/*",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["alun contributors"]
+repository = "https://github.com/wild1024/alun"
+homepage = "https://github.com/wild1024/alun"
+documentation = "https://docs.rs/alun"
+readme = "README.md"
+rust-version = "1.74"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "limit", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql", "sqlite", "chrono", "json", "uuid"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1"
+thiserror = "2"
+async-trait = "0.1"
+minijinja = "2"
+askama = "0.12"
+inventory = "0.3"
+linkme = "0.3"
+parking_lot = "0.12"
+dashmap = "6"
+bytes = "1"
+http = "1"
+redis = { version = "0.29", features = ["tokio-comp", "connection-manager"] }
+validator = { version = "0.20", features = ["derive"] }
+rdkafka = "0.36"
+jsonwebtoken = "9"
+bcrypt = "0.16"
+uuid = { version = "1", features = ["v4", "v7"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+alun-core = { version = "0.1.0", path = "alun-core" }
+alun-macros = { version = "0.1.0", path = "alun-macros" }
+alun-web = { version = "0.1.0", path = "alun-web" }
+alun-db = { version = "0.1.0", path = "alun-db" }
+alun-template = { version = "0.1.0", path = "alun-template" }
+alun-cache = { version = "0.1.0", path = "alun-cache" }
+alun-config = { version = "0.1.0", path = "alun-config" }
+alun-log = { version = "0.1.0", path = "alun-log" }
+alun-utils = { version = "0.1.0", path = "alun-utils" }
+alun-plugin = { version = "0.1.0", path = "alun-plugin" }
+alun-kafka = { version = "0.1.0", path = "alun-kafka" }
+alun-task = { version = "0.1.0", path = "alun-task" }
+alun-fs = { version = "0.1.0", path = "alun-fs" }

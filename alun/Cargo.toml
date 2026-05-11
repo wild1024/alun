@@ -1,0 +1,47 @@
+[package]
+name = "alun"
+description = "Alun: A fast, simple, and productive Rust web framework - config-driven, plugin-extensible, batteries included"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+keywords = ["web", "framework", "axum", "api", "rest"]
+categories = ["web-programming", "api-bindings"]
+
+[dependencies]
+alun-core = { workspace = true }
+alun-macros = { workspace = true }
+alun-web = { workspace = true, features = ["config"] }
+alun-config = { workspace = true }
+alun-db = { workspace = true, optional = true }
+alun-template = { workspace = true, optional = true }
+alun-cache = { workspace = true, optional = true }
+alun-plugin = { workspace = true, optional = true }
+alun-kafka = { workspace = true, optional = true }
+alun-task = { workspace = true, optional = true }
+alun-fs = { workspace = true, optional = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+linkme = { workspace = true }
+uuid = { workspace = true }
+
+[features]
+default = ["full"]
+full = ["db", "template", "cache", "plugin", "kafka", "task", "fs"]
+config = ["alun-web/config"]
+db = ["config", "dep:alun-db", "alun-web/db"]
+template = ["dep:alun-template", "alun-web/template"]
+cache = ["dep:alun-cache", "alun-web/cache"]
+plugin = ["dep:alun-plugin"]
+kafka = ["dep:alun-kafka"]
+task = ["dep:alun-task"]
+fs = ["dep:alun-fs"]

@@ -1,0 +1,54 @@
+[package]
+name = "alun-web"
+description = "Alun web layer: router, middleware, extractors, responses, JWT authentication"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-web"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["web", "framework", "router", "middleware", "jwt", "axum"]
+categories = ["web-programming", "authentication"]
+
+[dependencies]
+alun-core = { workspace = true, features = ["web"] }
+alun-macros = { workspace = true }
+alun-config = { workspace = true }
+alun-log = { workspace = true }
+alun-db = { workspace = true, optional = true }
+alun-cache = { workspace = true, optional = true }
+alun-utils = { workspace = true, features = ["validator-integration"] }
+alun-template = { workspace = true, optional = true }
+validator = { version = "0.20", features = ["derive"] }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true, features = ["net", "signal"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+jsonwebtoken = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = "0.2"
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }
+parking_lot = { workspace = true }
+linkme = { workspace = true }
+toml = "0.8"
+uuid = { version = "1", features = ["v4"] }
+hex = "0.4"
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+chrono = { workspace = true }
+
+[features]
+config = []
+db = ["dep:alun-db", "config"]
+cache = ["dep:alun-cache"]
+template = ["dep:alun-template"]

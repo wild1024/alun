@@ -1,0 +1,36 @@
+[package]
+name = "alun-test-suite"
+description = "Alun framework comprehensive test suite - functional tests and real-world scenario tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alun = { path = "../../alun", features = ["db", "cache", "template", "fs", "config"] }
+alun-core = { workspace = true, features = ["web"] }
+alun-web = { workspace = true, features = ["db", "cache", "template", "config"] }
+alun-db = { workspace = true }
+alun-cache = { workspace = true }
+alun-config = { workspace = true }
+alun-template = { workspace = true }
+alun-fs = { workspace = true }
+alun-utils = { workspace = true, features = ["validator-integration"] }
+alun-macros = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
+validator = { version = "0.20", features = ["derive"] }
+chrono = { workspace = true }
+jsonwebtoken = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
+tower = { workspace = true }
+http = { workspace = true }
+anyhow = { workspace = true }
+regex = "1"
+rand = "0.8"
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+linkme = { workspace = true }
+toml = "0.8"

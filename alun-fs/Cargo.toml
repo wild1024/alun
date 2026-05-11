@@ -1,0 +1,28 @@
+[package]
+name = "alun-fs"
+description = "Alun file system abstraction: local file storage and S3 integration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-fs"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["filesystem", "storage", "s3", "web", "framework"]
+categories = ["filesystem", "web-programming"]
+
+[dependencies]
+alun-core = { workspace = true }
+alun-config = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+bytes = { workspace = true }
+parking_lot = { workspace = true }

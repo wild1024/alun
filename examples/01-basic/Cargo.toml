@@ -1,0 +1,16 @@
+[package]
+name = "example-basic"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+alun = { path = "../../alun", features = ["full"] }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+linkme = { workspace = true }
+axum = { workspace = true }
+
+[[bin]]
+name = "basic"
+path = "main.rs"

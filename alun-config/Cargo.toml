@@ -1,0 +1,22 @@
+[package]
+name = "alun-config"
+description = "Alun configuration: TOML loading, multi-environment profiles, environment variables"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-config"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["config", "toml", "configuration", "web", "framework"]
+categories = ["config", "web-programming"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }

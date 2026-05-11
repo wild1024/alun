@@ -1,0 +1,22 @@
+[package]
+name = "alun-macros"
+description = "Alun proc macros: #[get], #[post], #[put], #[delete], #[controller], #[plugin], #[task_handler]"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-macros"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["web", "framework", "proc-macro", "routing", "plugin"]
+categories = ["web-programming", "development-tools"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"

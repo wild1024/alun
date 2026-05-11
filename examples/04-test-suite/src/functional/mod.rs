@@ -1,0 +1,9 @@
+pub mod core_tests;
+pub mod utils_tests;
+pub mod config_tests;
+pub mod cache_tests;
+pub mod template_tests;
+pub mod fs_tests;
+pub mod web_tests;
+pub mod middleware_tests;
+pub mod plugin_tests;

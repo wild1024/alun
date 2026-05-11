@@ -1,0 +1,28 @@
+[package]
+name = "alun-cache"
+description = "Alun cache abstraction: local in-memory cache + Redis integration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/alun-cache"
+readme = "README.md"
+rust-version.workspace = true
+keywords = ["cache", "redis", "in-memory", "web", "framework"]
+categories = ["caching", "database", "web-programming"]
+
+[dependencies]
+alun-core = { workspace = true }
+alun-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time"] }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+redis = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
