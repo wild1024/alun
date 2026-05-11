@@ -11,7 +11,7 @@ documentation = "https://docs.rs/alun-utils"
 readme = "README.md"
 rust-version.workspace = true
 keywords = ["utilities", "validation", "crypto", "uuid", "date"]
-categories = ["utilities", "web-programming"]
+categories = ["development-tools", "web-programming"]
 
 [dependencies]
 serde = { workspace = true }
