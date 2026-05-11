@@ -25,7 +25,6 @@ use std::sync::Arc;
 use alun_db::Db;
 #[cfg(feature = "cache")]
 use alun_cache::SharedCache;
-#[cfg(feature = "config")]
 use alun_config::ConfigManager;
 #[cfg(feature = "template")]
 use alun_template::TemplateEngine;
@@ -35,7 +34,6 @@ use alun_template::TemplateEngine;
 static DB: OnceLock<Db> = OnceLock::new();
 #[cfg(feature = "cache")]
 static CACHE: OnceLock<SharedCache> = OnceLock::new();
-#[cfg(feature = "config")]
 static CONFIG: OnceLock<Arc<ConfigManager>> = OnceLock::new();
 #[cfg(feature = "template")]
 static TEMPLATE: OnceLock<TemplateEngine> = OnceLock::new();
@@ -57,7 +55,6 @@ pub fn set_cache(cache: SharedCache) -> Result<(), &'static str> {
 }
 
 /// 初始化配置
-#[cfg(feature = "config")]
 pub fn set_config(config: Arc<ConfigManager>) -> Result<(), &'static str> {
     CONFIG.set(config).map_err(|_| "配置资源已初始化")
 }
@@ -95,19 +92,16 @@ pub fn try_cache() -> Option<&'static SharedCache> {
 }
 
 /// 获取全局配置管理器
-#[cfg(feature = "config")]
 pub fn config() -> &'static Arc<ConfigManager> {
     CONFIG.get().expect("配置未初始化，请先调用 set_config()")
 }
 
 /// 安全获取配置（返回 Option）
-#[cfg(feature = "config")]
 pub fn try_config() -> Option<&'static Arc<ConfigManager>> {
     CONFIG.get()
 }
 
 /// 获取全局配置（快捷方式）
-#[cfg(feature = "config")]
 pub fn cfg() -> &'static alun_config::AppConfig {
     config().get()
 }

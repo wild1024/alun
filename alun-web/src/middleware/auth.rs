@@ -26,6 +26,7 @@ pub struct AuthLayer {
     /// 跳过认证的路径列表（如 `/public/*`、`/api/login`）
     pub ignore_paths: Vec<String>,
     /// 缓存层引用（用于缓存用户信息）
+    #[cfg(feature = "cache")]
     pub cache: Option<alun_cache::SharedCache>,
 }
 
@@ -37,6 +38,7 @@ impl<S> Layer<S> for AuthLayer {
             inner,
             jwt_secret: self.jwt_secret.clone(),
             ignore_paths: self.ignore_paths.iter().cloned().collect(),
+            #[cfg(feature = "cache")]
             cache: self.cache.clone(),
         }
     }
@@ -52,6 +54,7 @@ pub struct AuthService<S> {
     /// 跳过认证的路径集合
     ignore_paths: HashSet<String>,
     /// 缓存层引用（用于缓存用户信息）
+    #[cfg(feature = "cache")]
     cache: Option<alun_cache::SharedCache>,
 }
 
@@ -80,23 +83,28 @@ where
         match token_opt {
             Some(token) => match validate_and_extract_claims(&self.jwt_secret, token) {
                 Ok(claims) => {
+                    #[cfg(feature = "cache")]
                     let cache = self.cache.clone();
                     let mut inner = self.inner.clone();
+                    #[allow(unused_variables)]
                     let is_ignore = is_ignore_path;
                     Box::pin(async move {
-                        // 黑名单检查：仅在非 ignore_path 时拒绝，ignore_path 应放行
-                        if !is_ignore {
-                            if let (Some(ref c), Some(ref jti)) = (&cache, &claims.jti) {
-                                let key = format!("token:blacklist:{}", jti);
-                                if let Ok(Some(_)) = alun_cache::Cache::get::<serde_json::Value>(c, &key).await {
-                                    let body = serde_json::to_string(&Res::<()>::fail(
-                                        codes::UNAUTHORIZED, "Token 已登出，请重新登录"
-                                    )).unwrap_or_else(|_| r#"{"code":401,"msg":"Token 已登出，请重新登录"}"#.to_string());
-                                    return Ok(Response::builder()
-                                        .status(StatusCode::UNAUTHORIZED)
-                                        .header("Content-Type", "application/json; charset=utf-8")
-                                        .body(Body::from(body))
-                                        .expect("response body build failed"));
+                        #[cfg(feature = "cache")]
+                        {
+                            // 黑名单检查：仅在非 ignore_path 时拒绝，ignore_path 应放行
+                            if !is_ignore {
+                                if let (Some(ref c), Some(ref jti)) = (&cache, &claims.jti) {
+                                    let key = format!("token:blacklist:{}", jti);
+                                    if let Ok(Some(_)) = alun_cache::Cache::get::<serde_json::Value>(c, &key).await {
+                                        let body = serde_json::to_string(&Res::<()>::fail(
+                                            codes::UNAUTHORIZED, "Token 已登出，请重新登录"
+                                        )).unwrap_or_else(|_| r#"{"code":401,"msg":"Token 已登出，请重新登录"}"#.to_string());
+                                        return Ok(Response::builder()
+                                            .status(StatusCode::UNAUTHORIZED)
+                                            .header("Content-Type", "application/json; charset=utf-8")
+                                            .body(Body::from(body))
+                                            .expect("response body build failed"));
+                                    }
                                 }
                             }
                         }

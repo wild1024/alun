@@ -701,10 +701,12 @@ impl App {
                     }
                 }
                 
+                #[cfg(feature = "cache")]
                 let cache = try_cache().cloned();
                 let auth_layer = mw::AuthLayer {
                     jwt_secret: cfg.middleware.auth.jwt_secret.clone(),
                     ignore_paths: ignore,
+                    #[cfg(feature = "cache")]
                     cache,
                 };
                 router = router.layer(auth_layer);

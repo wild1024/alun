@@ -22,7 +22,9 @@ pub mod permission_check;
 pub mod request_log;
 pub mod rate_limit;
 pub mod security_headers;
+#[cfg(feature = "cache")]
 pub mod nonce;
+#[cfg(feature = "cache")]
 pub mod idempotency;
 
 pub use request_id::{RequestIdLayer, RequestIdService};
@@ -33,7 +35,9 @@ pub use permission_check::{PermissionCheckLayer, PermissionRule, PermissionCheck
 pub use request_log::{RequestLogLayer, RequestLogService};
 pub use rate_limit::{RateLimitLayer, IpWindow, RateLimitService};
 pub use security_headers::{SecurityHeadersLayer, SecurityHeadersService};
+#[cfg(feature = "cache")]
 pub use nonce::{NonceLayer, NonceService};
+#[cfg(feature = "cache")]
 pub use idempotency::{IdempotencyLayer, IdempotencyService};
 
 /// Token 类型

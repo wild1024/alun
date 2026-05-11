@@ -1,19 +1,22 @@
-//! Nonce 防重放中间件（按需，建议仅在写操作路由上使用）
+//! 动态 Nonce 中间件 —— 通过动态路由提交/消费 Nonce 实现 CSRF 防护、重放防护。
 //!
-//! 客户端在请求头中携带 `x-nonce`（唯一随机值），
-//! 服务端通过缓存（LocalCache/Redis）检查该 nonce 是否已使用，
-//! 若已存在则返回 409 Conflict，拒绝重复请求。
+//! 安全防护原理：
+//! 服务端生成随机 nonce 并限制有效期（默认 5 分钟），
+//! 客户端必须在请求头中携带 `X-Nonce`，服务端校验后立即消费（一次有效）。
+//!
+//! # 配置
+//!
+//! ```toml
+//! [middleware.nonce]
+//! enabled = true
+//! ttl_secs = 300
+//! ```
 //!
 //! # 使用方式
 //!
-//! ```ignore
-//! use alun_web::middleware::NonceLayer;
-//!
-//! // 在特定写操作路由上单独包裹
-//! router.route("/api/transfer", post(transfer_handler).layer(
-//!     NonceLayer::new(cache, Duration::from_secs(300))
-//! ));
-//! ```
+//! 1. 前端先调用 `GET /api/nonce` 获取 nonce
+//! 2. 后续写操作请求中携带 `X-Nonce: <获取到的nonce>`
+//! 3. 中间件校验 nonce 有效且未过期，校验通过后立即消费
 
 use axum::{
     extract::Request,

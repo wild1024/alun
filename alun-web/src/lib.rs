@@ -15,18 +15,17 @@ pub use middleware::{UserId, AuthClaims, AuthLayer, RequireRoleLayer, RequirePer
 pub use jwt::JWT;
 pub use extract::ValidatedJson;
 
-pub use resources::{cfg, config, try_config, set_config};
-pub use resources::{upload_path, try_upload_path, set_upload_path};
-pub use resources::{download_path, try_download_path, set_download_path};
-
 #[cfg(feature = "db")]
-pub use resources::{db, try_db, set_db};
-
+pub use crate::resources::{db, try_db, set_db};
 #[cfg(feature = "cache")]
-pub use resources::{cache, try_cache, set_cache};
-
+pub use crate::resources::{cache, try_cache, set_cache};
+pub use crate::resources::{cfg, config, try_config, set_config};
 #[cfg(feature = "template")]
-pub use resources::{render_template, try_template, set_template};
+pub use crate::resources::{render_template, try_template, set_template};
+pub use crate::resources::{
+    set_upload_path, upload_path, try_upload_path,
+    set_download_path, download_path, try_download_path,
+};
 
 /// 路由注册分布式切片 —— `#[get]`、`#[post]` 等宏注解的处理器在此汇集
 #[linkme::distributed_slice]
