@@ -269,10 +269,11 @@ impl JWT {
 
 impl std::fmt::Debug for JWT {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut d = f.debug_struct("JWT");
+        let mut ds = f.debug_struct("JWT");
+        let d = &mut ds;
         #[cfg(feature = "cache")]
         {
-            d = d.field("has_cache", &self.cache.is_some());
+            d.field("has_cache", &self.cache.is_some());
         }
         d.finish()
     }

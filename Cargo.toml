@@ -63,7 +63,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 alun-core = { version = "0.1.0", path = "alun-core" }
 alun-macros = { version = "0.1.0", path = "alun-macros" }
-alun-web = { version = "0.1.0", path = "alun-web" }
+alun-web = { version = "0.1.1", path = "alun-web" }
 alun-db = { version = "0.1.0", path = "alun-db" }
 alun-template = { version = "0.1.0", path = "alun-template" }
 alun-cache = { version = "0.1.0", path = "alun-cache" }
