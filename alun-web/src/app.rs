@@ -689,7 +689,16 @@ impl App {
                 router = router.layer(rl_layer);
             }
 
-            if cfg.middleware.auth.enabled {
+            // 权限校验中间件：合并配置文件规则 + 宏注解规则
+            // 先添加 perm_layer，再添加 auth_layer，确保 auth 在 perm 外侧包裹，
+            // 这样请求先从 auth 层进入，AuthClaims 已注入 extensions，然后 perm 层才能读取
+            let mut perm_layer = mw::PermissionCheckLayer::from_config(&cfg.middleware.permission.rules);
+            perm_layer = perm_layer.with_macro_rules(&crate::PERMISSION_ROUTES);
+            if cfg.middleware.permission.enabled && perm_layer.has_rules() {
+                router = router.layer(perm_layer);
+            }
+
+            if cfg.middleware.auth.enabled && !cfg.middleware.auth.jwt_secret.is_empty() {
                 let mut ignore: Vec<String> = cfg.middleware.auth.ignore_paths
                     .iter().map(|p| format!("{}{}", self.prefix, p)).collect();
                 
@@ -710,14 +719,6 @@ impl App {
                     cache,
                 };
                 router = router.layer(auth_layer);
-            }
-
-            // 权限校验中间件：合并配置文件规则 + 宏注解规则
-            // 必须放在 AuthLayer 之内，确保执行时 AuthClaims 已注入 extensions
-            let mut perm_layer = mw::PermissionCheckLayer::from_config(&cfg.middleware.permission.rules);
-            perm_layer = perm_layer.with_macro_rules(&crate::PERMISSION_ROUTES);
-            if cfg.middleware.permission.enabled && perm_layer.has_rules() {
-                router = router.layer(perm_layer);
             }
         }
         router

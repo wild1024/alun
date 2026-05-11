@@ -133,8 +133,20 @@ where
                 let claims_present = req.extensions().get::<AuthClaims>().cloned();
 
                 let has_perm = match &claims_present {
-                    Some(AuthClaims(claims)) => claims.has_permission(&required_perm),
-                    None => false,
+                    Some(AuthClaims(claims)) => {
+                        tracing::debug!(
+                            "权限检查: path={}, required={}, user_perms={:?}",
+                            path, required_perm, claims.permissions
+                        );
+                        claims.has_permission(&required_perm)
+                    }
+                    None => {
+                        tracing::warn!(
+                            "权限检查: path={}, required={}, AuthClaims 未注入 (auth 中间件未执行或配置有误)",
+                            path, required_perm
+                        );
+                        false
+                    }
                 };
 
                 if has_perm {
