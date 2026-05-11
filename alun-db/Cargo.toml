@@ -10,7 +10,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/alun-db"
 readme = "README.md"
 rust-version.workspace = true
-keywords = ["database", "sqlx", "crud", "orm", "postgresql", "mysql", "sqlite"]
+keywords = ["database", "sqlx", "crud", "orm", "postgresql"]
 categories = ["database", "database-implementations", "web-programming"]
 
 [dependencies]

@@ -10,7 +10,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/alun-utils"
 readme = "README.md"
 rust-version.workspace = true
-keywords = ["utilities", "string", "date", "validation", "crypto", "uuid"]
+keywords = ["utilities", "validation", "crypto", "uuid", "date"]
 categories = ["utilities", "web-programming"]
 
 [dependencies]

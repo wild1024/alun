@@ -10,7 +10,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/alun-task"
 readme = "README.md"
 rust-version.workspace = true
-keywords = ["task", "async", "kafka", "retry", "dlq", "worker"]
+keywords = ["task", "async", "kafka", "retry", "dlq"]
 categories = ["asynchronous", "web-programming", "network-programming"]
 
 [dependencies]

@@ -10,7 +10,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/alun-plugin"
 readme = "README.md"
 rust-version.workspace = true
-keywords = ["plugin", "notification", "email", "scheduler", "web", "framework"]
+keywords = ["plugin", "notification", "email", "scheduler", "web"]
 categories = ["web-programming", "email"]
 
 [dependencies]

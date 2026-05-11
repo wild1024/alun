@@ -10,7 +10,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/alun-template"
 readme = "README.md"
 rust-version.workspace = true
-keywords = ["template", "jinja2", "minijinja", "askama", "web", "framework"]
+keywords = ["template", "jinja2", "minijinja", "askama", "web"]
 categories = ["web-programming", "template-engine"]
 
 [dependencies]

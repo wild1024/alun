@@ -10,7 +10,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/alun-web"
 readme = "README.md"
 rust-version.workspace = true
-keywords = ["web", "framework", "router", "middleware", "jwt", "axum"]
+keywords = ["web", "framework", "router", "middleware", "jwt"]
 categories = ["web-programming", "authentication"]
 
 [dependencies]
