@@ -3,3 +3,5 @@ Cargo.lock
 .idea/
 *.iml
 .DS_Store
+downloads/
+uploads/
