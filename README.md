@@ -459,6 +459,8 @@ ALUN_PROFILE=prod ALUN_LOG_LEVEL=debug cargo run   # 环境变量覆盖
 | 缓存 | 内置 + Redis |
 
 ---
+交流QQ群：1022721856
+<img width="973" height="1208" alt="image" src="https://github.com/user-attachments/assets/9aef0dd2-ea57-4c9e-bd93-29c2bfb49964" />
 
 ## License
 
