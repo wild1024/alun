@@ -48,6 +48,8 @@ macro_rules! impl_db_ops {
             fn [<typed_row_to_row_ $db_mod:snake>](
                 row: &<sqlx::$db_mod as sqlx::Database>::Row
             ) -> Row {
+                use chrono::{DateTime, Utc};
+
                 let mut r = Row::default();
                 for col in row.columns() {
                     let name = col.name().to_string();
@@ -62,12 +64,16 @@ macro_rules! impl_db_ops {
                         r.data.insert(name, Value::String(v));
                     } else if let Ok(v) = row.try_get::<sqlx::types::Uuid, usize>(idx) {
                         r.data.insert(name, Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<DateTime<Utc>, usize>(idx) {
+                        r.data.insert(name, Value::String(v.to_rfc3339()));
                     } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
                         if let Some(n) = Number::from_f64(v) {
                             r.data.insert(name, Value::Number(n));
                         }
                     } else if let Ok(v) = row.try_get::<bool, usize>(idx) {
                         r.data.insert(name, Value::Bool(v));
+                    } else if let Ok(v) = row.try_get::<serde_json::Value, usize>(idx) {
+                        r.data.insert(name, v);
                     }
                 }
                 r.mark_all_changed();

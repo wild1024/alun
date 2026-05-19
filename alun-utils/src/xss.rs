@@ -34,8 +34,9 @@ pub fn sanitize_html(html: &str) -> String {
 
 /// 使用严格规则净化 HTML（仅保留基本文本格式标签）
 pub fn sanitize_html_strict(html: &str) -> String {
+    use std::collections::HashSet;
     Builder::default()
-        .strip_all_tags()
+        .tags(HashSet::new())
         .clean(html)
         .to_string()
 }

@@ -12,6 +12,7 @@ use axum::{
 };
 use alun_core::api::ApiError;
 use serde::de::DeserializeOwned;
+use validator::ValidationError;
 
 /// 带自动校验的 JSON 提取器
 ///
@@ -24,6 +25,8 @@ use serde::de::DeserializeOwned;
 ///     pub username: String,
 ///     #[validate(email)]
 ///     pub email: String,
+///     #[validate(custom(function = "validate_uuid"))]
+///     pub parent_id: String,
 /// }
 ///
 /// async fn create_user(ValidatedJson(req): ValidatedJson<CreateUserReq>) -> Res<String> {
@@ -96,5 +99,189 @@ impl IntoResponse for ValidatedJsonRejection {
 impl From<ValidatedJsonRejection> for ApiError {
     fn from(rejection: ValidatedJsonRejection) -> Self {
         rejection.0
+    }
+}
+
+// ---- 自定义 validator 校验函数 ----
+//
+// 以下函数可直接用于 #[validate(custom(function = "..."))] 属性宏
+// 字段为空时自动跳过校验（validate_password_strength 除外）
+
+/// validator 自定义校验：UUID 格式
+///
+/// 字段为空时自动跳过校验；有值时校验 UUID 格式（v1~v7 均支持）。
+///
+/// # 使用示例
+///
+/// ```ignore
+/// #[derive(Debug, Deserialize, Validate)]
+/// pub struct Req {
+///     #[validate(custom(function = "validate_uuid"))]
+///     pub parent_id: String,
+/// }
+/// ```
+pub fn validate_uuid(value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if alun_utils::valid::Valid::is_uuid(value) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid_uuid")
+            .with_message("必须是有效的 UUID 格式".into()))
+    }
+}
+
+/// validator 自定义校验：手机号/固话（中国大陆）
+///
+/// 字段为空时自动跳过校验；有值时校验手机号或固话格式。
+///
+/// ```ignore
+/// #[validate(custom(function = "validate_mobile"))]
+/// pub mobile: String,
+/// ```
+pub fn validate_mobile(value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if alun_utils::valid::Valid::is_mobile(value) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid_mobile")
+            .with_message("必须是有效的手机号".into()))
+    }
+}
+
+/// validator 自定义校验：密码强度
+///
+/// 始终校验，为空时也会报错（密码必须满足强度要求）。
+///
+/// ```ignore
+/// #[validate(custom(function = "validate_password_strength"))]
+/// pub password: String,
+/// ```
+pub fn validate_password_strength(value: &str) -> Result<(), ValidationError> {
+    if alun_utils::valid::Valid::is_strong_password(value) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("weak_password")
+            .with_message("密码必须至少 8 位，包含大小写字母、数字和特殊字符".into()))
+    }
+}
+
+/// validator 自定义校验：身份证号
+///
+/// 字段为空时自动跳过校验；有值时校验中国居民身份证号（含校验位）。
+///
+/// ```ignore
+/// #[validate(custom(function = "validate_id_card"))]
+/// pub id_card: String,
+/// ```
+pub fn validate_id_card(value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if alun_utils::valid::Valid::is_id_card(value) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid_id_card")
+            .with_message("必须是有效的身份证号".into()))
+    }
+}
+
+/// validator 自定义校验：日期格式（YYYY-MM-DD）
+///
+/// 字段为空时自动跳过校验；有值时校验日期格式。
+///
+/// ```ignore
+/// #[validate(custom(function = "validate_date"))]
+/// pub date: String,
+/// ```
+pub fn validate_date(value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if alun_utils::valid::Valid::is_date(value) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid_date")
+            .with_message("日期格式必须为 YYYY-MM-DD".into()))
+    }
+}
+
+/// validator 自定义校验：邮箱
+///
+/// 字段为空时自动跳过校验；有值时校验邮箱格式。
+///
+/// ```ignore
+/// #[validate(custom(function = "validate_email"))]
+/// pub email: String,
+/// ```
+pub fn validate_email(value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if alun_utils::valid::Valid::is_email(value) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid_email")
+            .with_message("必须是有效的邮箱格式".into()))
+    }
+}
+
+/// validator 自定义校验：URL
+///
+/// 字段为空时自动跳过校验；有值时校验 URL 格式。
+///
+/// ```ignore
+/// #[validate(custom(function = "validate_url"))]
+/// pub url: String,
+/// ```
+pub fn validate_url(value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if alun_utils::valid::Valid::is_url(value) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid_url")
+            .with_message("必须是有效的 URL 格式".into()))
+    }
+}
+
+/// validator 自定义校验：日期时间格式（ISO 8601 / RFC 3339）
+///
+/// 字段为空时自动跳过校验；有值时校验日期时间格式。
+///
+/// ```ignore
+/// #[validate(custom(function = "validate_datetime"))]
+/// pub publish_time: String,
+/// ```
+pub fn validate_datetime(value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if alun_utils::valid::Valid::is_datetime(value) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid_datetime")
+            .with_message("日期时间格式必须为 ISO 8601/RFC 3339".into()))
+    }
+}
+
+/// 为实现了 `Validate` 的类型提供便捷的校验方法
+///
+/// 在 handler 中通过 `req.validate_or_reject()?;` 即可完成校验。
+pub trait ValidateExt {
+    fn validate_or_reject(&self) -> Result<(), ApiError>;
+}
+
+impl<T: validator::Validate> ValidateExt for T {
+    fn validate_or_reject(&self) -> Result<(), ApiError> {
+        self.validate().map_err(|e| {
+            ApiError::unprocessable_entity(
+                alun_utils::valid::Valid::format_validation_errors(&e)
+            )
+        })
     }
 }

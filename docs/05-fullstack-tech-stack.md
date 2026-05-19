@@ -84,7 +84,7 @@
 | **Token 管理** | `JWT::from_config()` | 自动读取 `config.toml` 的 secret/过期时间 |
 | **黑名单机制** | 内置（基于 `jti` + 内存/Redis） | Refresh 自动黑名单旧 Token |
 | **权限控制** | 路径规则 + `#[alun::permission]` 注解 | 白名单模式，双机制 |
-| **密码哈希** | Argon2（`Crypto::hash_password`） | 抗 GPU 破解的现代哈希算法 |
+| **密码哈希** | Argon2（生成）+ BCrypt（兼容验证）<br/>`Crypto::hash_password` / `Crypto::verify_password` | 自动检测算法格式，支持混合迁移 |
 | **加密** | AES-256-GCM（`Crypto::aes_encrypt`） | 对称加密，适合数据库密码字段 |
 | **安全响应头** | 6 个安全头自动注入 | X-Content-Type-Options / X-Frame-Options / HSTS / CSP / Referrer-Policy / Permissions-Policy |
 | **防重放** | `NonceLayer`（按需） | `x-nonce` 头去重 |
@@ -107,8 +107,13 @@
 
 | 能力 | 技术选型 | 说明 |
 |------|---------|------|
-| **本地存储** | `LocalFs`（`alun-fs`） | 本地文件系统操作 |
-| **对象存储** | MinIO / AWS S3 / 阿里云 OSS | 通过 `alun-fs` trait 扩展实现 |
+| **统一接口** | `StorageBackend` trait | write / read / delete / exists / presign_url / health_check 六大契约 |
+| **多后端注册** | `BackendRegistry` | 按 backend_type 管理实例，支持运行时注册 + linkme 编译期自动发现 |
+| **插件门面** | `FsPlugin`（实现 `Plugin` trait） | 统一生命周期管理，`write_to(backend_type, ...)` 按后端类型路由 |
+| **本地存储** | `LocalFs` | 按日期分目录 YYYY/MM/DD/uuid.ext，自动 MIME 推断 |
+| **对象存储** | `MinioBackend`（feature = "minio"） | MinIO / AWS S3 兼容，支持预签名 URL |
+| **自定义后端** | `#[storage_backend]` 宏 + `impl StorageBackend` | 编译期自动发现（linkme 分布式切片），零手动注册 |
+| **配置管理** | `[fs]` section（config.toml） | default_backend_type / local_root_dir / max_file_size_bytes / presign_url_ttl_secs |
 | **上传路径** | `upload_path()` 全局函数 | 配置 `[upload].path` 控制 |
 
 ### 2.7 模板引擎

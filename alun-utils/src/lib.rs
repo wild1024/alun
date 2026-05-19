@@ -1,4 +1,4 @@
-//! 工具类：字符串、日期、脱敏、短ID、验证、Web解析、加密、XSS净化
+//! 工具类：字符串、日期、脱敏、短ID、验证、Web解析、加密、XSS净化、UA解析
 
 pub mod str;
 pub mod date;
@@ -8,6 +8,7 @@ pub mod valid;
 pub mod web;
 pub mod crypto;
 pub mod export;
+pub mod ua;
 
 #[cfg(feature = "xss")]
 pub mod xss;
@@ -26,3 +27,4 @@ pub use web::WebExt;
 pub use web::extract_client_ip;
 pub use crypto::Crypto;
 pub use export::{Export, Import, ExportFormat};
+pub use ua::{parse_user_agent, UaInfo};

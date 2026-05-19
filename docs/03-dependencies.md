@@ -48,7 +48,7 @@
 | **alun-plugin** | `alun-core`, `alun-config`, `alun-cache` | 插件基于核心 Plugin trait + 配置驱动 |
 | **alun-kafka** | `alun-core`, `alun-config` | Kafka 集成核心框架 |
 | **alun-task** | `alun-core`（Plugin trait） | 异步任务框架，零 SQL 依赖，持久化通过 TaskStorage trait 委托 |
-| **alun-fs** | `alun-core`, `alun-config` | 文件系统核心框架 |
+| **alun-fs** | `alun-core`, `alun-config` | 多后端文件存储核心框架（本地/MinIO/S3） |
 | **alun** | 所有以上 crate（按需 features） | 门面层统一导出 |
 | **alun-macros** | `alun-web`（编译期引用） | Proc Macro 生成引用 `alun::ROUTES` 的代码 |
 

@@ -60,7 +60,7 @@ alun/                              # 工作空间根目录
 ├── alun-plugin/                   # 内置插件：缓存、通知、异步任务、定时任务
 ├── alun-kafka/                    # Kafka 集成：生产者/消费者
 ├── alun-task/                     # 异步任务框架：Kafka 驱动、宏注册、泛型存储、DLQ
-├── alun-fs/                       # 文件系统抽象：本地文件存储
+├── alun-fs/                       # 文件系统抽象：多后端存储（本地 / MinIO / S3）
 └── examples/                      # 示例项目
     ├── 00-quick-start/            # 快速入门：全功能演示
     ├── 01-basic/                  # 基础启动：配置驱动

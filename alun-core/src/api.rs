@@ -214,11 +214,15 @@ impl ApiError {
         Self::new(429, codes::TOO_MANY_REQUESTS, msg)
     }
 
-    /// 500 Internal Server Error：服务端内部错误
+    /// 500 Internal Server Error：服务端内部错误（已脱敏）
     ///
-    /// 前端仅看到模糊提示；完整错误需通过日志排查。
+    /// 前端始终收到模糊提示 `"服务器内部错误"`；
+    /// 真实错误存入 `internal_detail` 并通过 `tracing::error!` 写入日志。
+    ///
+    /// 如需自定义前端提示消息，请使用 [`internal_masked`]。
     pub fn internal(msg: impl Into<String>) -> Self {
-        Self::new(500, codes::INTERNAL, msg)
+        Self::new(500, codes::INTERNAL, "服务器内部错误")
+            .with_detail(msg)
     }
 
     /// 500 Internal Server Error（带调试详情）

@@ -71,12 +71,22 @@ impl Crypto {
         Ok(hash.to_string())
     }
 
-    /// 验证密码是否匹配 Argon2 哈希
-    pub fn verify_password(password: &str, hash: &str) -> Result<bool, argon2::password_hash::Error> {
-        use argon2::{Argon2, PasswordVerifier, PasswordHash};
-        let parsed = PasswordHash::new(hash)?;
-        let argon2 = Argon2::default();
-        Ok(argon2.verify_password(password.as_bytes(), &parsed).is_ok())
+    /// 验证密码是否匹配哈希
+    ///
+    /// 自动检测哈希算法：以 `$argon2` 开头使用 Argon2 验证，以 `$2` 开头使用 BCrypt 验证。
+    pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
+        if hash.starts_with("$argon2") {
+            use argon2::{Argon2, PasswordVerifier, PasswordHash};
+            let parsed = PasswordHash::new(hash)
+                .map_err(|e| format!("Argon2 hash parse error: {e}"))?;
+            let argon2 = Argon2::default();
+            Ok(argon2.verify_password(password.as_bytes(), &parsed).is_ok())
+        } else if hash.starts_with("$2") {
+            bcrypt::verify(password, hash)
+                .map_err(|e| format!("BCrypt verify error: {e}"))
+        } else {
+            Err("Unknown hash format".into())
+        }
     }
 
     /// Base64 URL 安全编码（无填充，适合放在 URL/文件名中）

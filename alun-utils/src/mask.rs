@@ -116,6 +116,45 @@ impl Mask {
         for _ in 1..chars.len() { result.push('*'); }
         result
     }
+    /// 用户ID脱敏：保留前2后2字符
+    pub fn user_id(id: &str) -> String {
+        if id.len() <= 4 { return "****".to_string(); }
+        format!("{}****{}", &id[..2], &id[id.len()-2..])
+    }
+    /// 密码脱敏：固定返回 `******`
+    pub fn password(_password: &str) -> String {
+        "******".to_string()
+    }
+    /// 地址脱敏：保留前6个字符（省市区），其余用 `****` 代替
+    pub fn address(addr: &str) -> String {
+        if addr.len() <= 6 { return "****".to_string(); }
+        format!("{}****", &addr[..addr.len().min(6)])
+    }
+    /// 车牌号脱敏：保留首字符（省份简称）和末位，中间用 `****` 代替
+    pub fn license_plate(plate: &str) -> String {
+        let chars: Vec<char> = plate.chars().collect();
+        if chars.len() < 3 { return "****".to_string(); }
+        format!("{}****{}", chars[0], chars[chars.len()-1])
+    }
+    /// 根据数据类型自动选择脱敏方式
+    ///
+    /// # 参数
+    /// - `data_type`: 数据类型（user_id/mobile/password/address/bank_card/license_plate/email/id_card/name）
+    /// - `value`: 待脱敏的值
+    pub fn mask_by_type(data_type: &str, value: &str) -> String {
+        match data_type {
+            "user_id" => Self::user_id(value),
+            "mobile" => Self::mobile(value),
+            "password" => Self::password(value),
+            "address" => Self::address(value),
+            "bank_card" => Self::bank_card(value),
+            "license_plate" => Self::license_plate(value),
+            "email" => Self::email(value),
+            "id_card" => Self::id_card(value),
+            "name" => Self::name(value),
+            _ => format!("{}***{}", &value[..value.len().min(2)], &value[value.len()-value.len().min(2)..]),
+        }
+    }
 }
 
 #[cfg(test)]

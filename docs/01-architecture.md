@@ -59,7 +59,7 @@ Alun 不是 aifei（Java Web 框架）的代码翻译，而是 aifei **设计理
 | `alun-plugin` | 内置插件实现（通知/缓存/异步任务/定时任务/SID） | 扩展功能 |
 | `alun-kafka` | Kafka 生产者/消费者（基于 rdkafka） | 扩展功能 |
 | `alun-task` | 异步任务框架（Kafka 驱动、宏注册、泛型存储、DLQ） | 扩展功能 |
-| `alun-fs` | 文件系统抽象（本地存储） | 扩展功能 |
+| `alun-fs` | 文件系统抽象（多后端存储：本地/MinIO/S3） | 扩展功能 |
 
 ## 3. 请求处理流程
 

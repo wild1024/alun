@@ -61,16 +61,16 @@ bcrypt = "0.16"
 uuid = { version = "1", features = ["v4", "v7"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-alun-core = { version = "0.1.0", path = "alun-core" }
+alun-core = { version = "0.1.1", path = "alun-core" }
 alun-macros = { version = "0.1.0", path = "alun-macros" }
-alun-web = { version = "0.1.2", path = "alun-web" }
-alun-db = { version = "0.1.0", path = "alun-db" }
+alun-web = { version = "0.1.3", path = "alun-web" }
+alun-db = { version = "0.1.1", path = "alun-db" }
 alun-template = { version = "0.1.0", path = "alun-template" }
 alun-cache = { version = "0.1.0", path = "alun-cache" }
 alun-config = { version = "0.1.0", path = "alun-config" }
-alun-log = { version = "0.1.0", path = "alun-log" }
-alun-utils = { version = "0.1.0", path = "alun-utils" }
+alun-log = { version = "0.1.1", path = "alun-log" }
+alun-utils = { version = "0.1.1", path = "alun-utils" }
 alun-plugin = { version = "0.1.0", path = "alun-plugin" }
 alun-kafka = { version = "0.1.0", path = "alun-kafka" }
 alun-task = { version = "0.1.0", path = "alun-task" }
-alun-fs = { version = "0.1.0", path = "alun-fs" }
+alun-fs = { version = "0.1.1", path = "alun-fs" }

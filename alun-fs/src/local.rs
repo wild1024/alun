@@ -6,12 +6,12 @@ use uuid::Uuid;
 use chrono::Utc;
 
 use super::plugin::{FileMeta, StoreResult};
+use super::backend::StorageBackend;
 
 /// 本地文件系统存储后端
 ///
 /// 支持按相对路径读写/删除文件，自动创建目录，自动推算 MIME 类型。
 pub struct LocalFs {
-    /// 存储根目录（绝对路径）
     root_dir: PathBuf,
 }
 
@@ -36,8 +36,8 @@ impl LocalFs {
     /// 获取存储根目录路径
     pub fn root_dir(&self) -> &Path { &self.root_dir }
 
-    /// 写入文件（relative_path 保留原始名称，UUID 作为 file_id）
-    pub async fn write(&self, relative_path: &str, data: &[u8]) -> StoreResult<FileMeta> {
+    /// 写入文件（按指定路径，保留原始名称）
+    pub async fn write_at(&self, relative_path: &str, data: &[u8]) -> StoreResult<FileMeta> {
         let full_path = self.resolve(relative_path);
         self.ensure_parent(&full_path).await?;
 
@@ -70,7 +70,7 @@ impl LocalFs {
 
     /// 写入文件（自动按日期分目录：`YYYY/MM/DD/uuid.ext`）
     ///
-    /// 比 `write` 更安全——上层无需关心路径命名。
+    /// 上层无需关心路径命名。
     pub async fn write_with_name(&self, original_name: &str, data: &[u8]) -> StoreResult<FileMeta> {
         let ext = Path::new(original_name)
             .extension()
@@ -171,6 +171,28 @@ impl LocalFs {
     }
 }
 
+#[async_trait::async_trait]
+impl StorageBackend for LocalFs {
+    fn backend_type(&self) -> &str { "local" }
+
+    async fn write(&self, original_name: &str, data: &[u8]) -> Result<FileMeta, String> {
+        self.write_with_name(original_name, data).await
+    }
+
+    async fn read(&self, stored_path: &str) -> Result<Vec<u8>, String> {
+        self.read(stored_path).await
+    }
+
+    async fn delete(&self, stored_path: &str) -> Result<(), String> {
+        self.delete(stored_path).await
+    }
+
+    async fn exists(&self, stored_path: &str) -> bool {
+        self.exists(stored_path).await
+    }
+}
+
+/// MIME 类型推断（基于文件扩展名，无额外依赖）
 fn mime_guess(filename: &str) -> String {
     let ext = Path::new(filename)
         .extension()
@@ -200,4 +222,107 @@ fn mime_guess(filename: &str) -> String {
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         _ => "application/octet-stream",
     }.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("alun_fs_local_{}", name));
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
+
+    fn cleanup(dir: &Path) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn test_write_with_name_and_read() {
+        let dir = test_dir("write_read");
+        let local_fs = LocalFs::new(dir.to_str().unwrap());
+
+        let meta = local_fs.write_with_name("test.txt", b"hello world").await.unwrap();
+        assert_eq!(meta.original_name, "test.txt");
+        assert_eq!(meta.size, 11);
+        assert_eq!(meta.content_type, "text/plain");
+        assert!(!meta.stored_path.is_empty());
+        assert!(!meta.file_id.is_empty());
+
+        let data = local_fs.read(&meta.stored_path).await.unwrap();
+        assert_eq!(data, b"hello world");
+
+        cleanup(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_write_and_delete() {
+        let dir = test_dir("write_del");
+        let local_fs = LocalFs::new(dir.to_str().unwrap());
+
+        let meta = local_fs.write_with_name("delete_me.txt", b"tmp").await.unwrap();
+        assert!(local_fs.exists(&meta.stored_path).await);
+
+        local_fs.delete(&meta.stored_path).await.unwrap();
+        assert!(!local_fs.exists(&meta.stored_path).await);
+
+        // 幂等删除
+        assert!(local_fs.delete(&meta.stored_path).await.is_ok());
+
+        cleanup(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_read_nonexistent() {
+        let dir = test_dir("read_nonexist");
+        let local_fs = LocalFs::new(dir.to_str().unwrap());
+
+        let result = local_fs.read("nonexistent/path.txt").await;
+        assert!(result.is_err());
+
+        cleanup(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_storage_backend_trait() {
+        let dir = test_dir("trait");
+        let local_fs = LocalFs::new(dir.to_str().unwrap());
+
+        assert_eq!(local_fs.backend_type(), "local");
+
+        let meta = local_fs.write("trait_test.txt", b"trait test").await.unwrap();
+        assert_eq!(meta.original_name, "trait_test.txt");
+
+        let data = StorageBackend::read(&local_fs, &meta.stored_path).await.unwrap();
+        assert_eq!(data, b"trait test");
+
+        assert!(StorageBackend::exists(&local_fs, &meta.stored_path).await);
+        StorageBackend::delete(&local_fs, &meta.stored_path).await.unwrap();
+        assert!(!StorageBackend::exists(&local_fs, &meta.stored_path).await);
+
+        cleanup(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_write_at_and_no_extension() {
+        let dir = test_dir("noext");
+        let local_fs = LocalFs::new(dir.to_str().unwrap());
+
+        let meta = local_fs.write_with_name("noext", b"no extension").await.unwrap();
+        assert!(meta.stored_path.ends_with(".bin"));
+
+        cleanup(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_mime_guess_variants() {
+        use super::mime_guess;
+        assert_eq!(mime_guess("photo.jpg"), "image/jpeg");
+        assert_eq!(mime_guess("data.json"), "application/json");
+        assert_eq!(mime_guess("sheet.xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        assert_eq!(mime_guess("unknown.xyz"), "application/octet-stream");
+    }
 }

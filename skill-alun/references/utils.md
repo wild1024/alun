@@ -69,7 +69,7 @@ Valid::is_digits("123456");
 ```rust
 Crypto::sha256("data");
 Crypto::hash_password("pass123");           // Argon2
-Crypto::verify_password("pass123", &hash)?;
+Crypto::verify_password("pass123", &hash)?;  // Auto-detect Argon2/BCrypt
 Crypto::random_key();                       // 32 random bytes
 Crypto::random_token(32);                   // Random hex token
 let encrypted = Crypto::aes_encrypt("secret", &key_hex)?;

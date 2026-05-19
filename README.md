@@ -109,7 +109,7 @@ Alun 从框架层面解决这个问题：
 | 🧩 **插件** | 拓扑排序生命周期 + 定时任务 + 异步任务 + 邮件通知 | `[plugins]` |
 | 📨 **Kafka** | 生产者/消费者（rdkafka），高吞吐消息处理 | `features = ["kafka"]` |
 | 📋 **异步任务** | Kafka 驱动 + 指数退避重试 + 死信队列 + 宏自动注册 | `features = ["task"]` |
-| 📁 **文件系统** | 本地文件存储抽象，统一读写接口 | `features = ["fs"]` |
+| 📁 **文件系统** | 多后端存储（本地 / MinIO / S3），Trait + Registry 可扩展架构 | `features = ["fs"]` |
 | ⚙️ **配置系统** | TOML + 多环境 Profile + `ALUN_*` 环境变量覆盖 | 默认 |
 
 **一份 TOML 配置，掌控全部功能。** 不需要翻阅文档寻找 API，不需要写 YAML 再写代码再写注解 —— 打开 `config.toml`，改一行，重启，功能上线。
@@ -151,7 +151,7 @@ alun/                              # 工作空间根目录
 ├── alun-plugin/                   # 插件：定时任务、异步任务、邮件通知
 ├── alun-kafka/                    # Kafka 集成
 ├── alun-task/                     # 异步任务框架（Kafka 驱动、宏注册、泛型存储）
-├── alun-fs/                       # 文件系统抽象
+├── alun-fs/                       # 文件系统抽象：多后端存储（本地 / MinIO / S3）
 ├── docs/                          # 📖 Code Wiki 文档
 └── examples/                      # 示例项目
 ```
@@ -253,7 +253,21 @@ Date::fmt(&now, "%Y-%m-%d %H:%M:%S");  // → "2026-01-01 12:00:00"
 // ── 脱敏 ──
 Mask::mobile("13812345678");            // → "138****5678"
 Mask::email("a@b.com");                 // → "a***@b.com"
+Mask∶:id_card("320112199001011234");     // → "3201****1234"
 Mask::name("张三丰");                    // → "张**"
+Mask::bank_card("6222021234567890");    // → "6222 **** 7890"
+Mask::user_id("user_abc123");           // → "us****23"
+Mask::password("secret");               // → "******"
+Mask::address("北京市海淀区中关村");        // → "北京市海淀****"
+Mask::license_plate("京A12345");         // → "京****5"
+Mask::mask_by_type("mobile", "13812345678"); // 按类型自动选择脱敏方式
+
+// ── User-Agent 解析 ──
+use alun_utils::parse_user_agent;
+let info = parse_user_agent("Mozilla/5.0 (Windows NT 10.0) ... Chrome/120.0");
+info.device_type;   // → "PC"
+info.browser_type;  // → "Chrome"
+info.os_type;       // → "Windows"
 
 // ── ID 生成 ──
 Sid::uuid();                            // UUID v4
@@ -264,11 +278,50 @@ Sid::short();                           // 16位hex
 // ── 验证 ──
 Valid::is_email("a@b.com");             // → true
 Valid::is_mobile("13812345678");        // → true
+Valid::is_phone("+8613812345678");      // → true（E.164 格式）
+Valid::is_url("https://example.com");   // → true
+Valid::is_ipv4("192.168.1.1");          // → true
 Valid::is_strong_password("Abc@12345"); // → true
+Valid::is_username("john_doe");         // → true（3~50位）
+Valid::is_color("#FF00AA");             // → true（#RRGGBB）
+Valid::is_uuid("550e8400-...");         // → true（v1~v7）
+Valid::is_id_card("320112199001011234");// → true（含校验位）
+Valid::is_date("2024-01-01");           // → true（YYYY-MM-DD）
+Valid::is_datetime("2024-01-01T00:00:00Z"); // → true（RFC 3339）
+Valid::is_json(r#"{"key": 1}"#);        // → true
+Valid::is_base64("SGVsbG8=");           // → true
+Valid::is_digits("123456");             // → true
+Valid::is_alphanumeric("abc123");       // → true
+Valid::len_between("hello", 2, 10);     // → true
+Valid::has_html("<div>hello</div>");    // → true
+Valid::is_html_free("plain text");      // → true
+Valid::is_file_extension("photo.jpg", &["jpg","png"]); // → true
+
+// ── DTO 字段校验（validator crate 集成） ──
+// 在 extract.rs 中内置了自定义验证函数，可直接用于 #[validate(custom(...))]
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreateUserReq {
+    #[validate(custom(function = "validate_uuid"))]
+    pub parent_id: String,
+    #[validate(custom(function = "validate_mobile"))]
+    pub mobile: String,
+    #[validate(custom(function = "validate_password_strength"))]
+    pub password: String,
+    #[validate(custom(function = "validate_id_card"))]
+    pub id_card: String,
+    #[validate(custom(function = "validate_date"))]
+    pub birth_date: String,
+}
+
+// ValidateExt trait：为 DTO 提供便捷的 validate_or_reject() 方法
+async fn create(ValidatedJson(req): ValidatedJson<CreateUserReq>) -> Result<Res<String>, ApiError> {
+    req.validate_or_reject()?; // 一行完成字段级校验，失败返回 422
+    Ok(Res::ok("OK".into()))
+}
 
 // ── 加密 ──
 Crypto::hash_password("pass123");       // Argon2 哈希
-Crypto::verify_password("pass123", &hash)?;
+Crypto::verify_password("pass123", &hash)?;  // 自动检测 Argon2/BCrypt 算法
 Crypto::random_token(32);               // 随机 hex Token
 
 // ── 字符串清理 ──
@@ -453,7 +506,7 @@ ALUN_PROFILE=prod ALUN_LOG_LEVEL=debug cargo run   # 环境变量覆盖
 | 日志 | tracing + tracing-subscriber |
 | 配置 | TOML（serde） |
 | JWT | jsonwebtoken 9 |
-| 密码哈希 | argon2 |
+| 密码哈希 | argon2（生成）/ bcrypt（兼容验证） |
 | HTML净化 | ammonia 4（可选 feature） |
 | 消息队列 | rdkafka 0.36 |
 | 缓存 | 内置 + Redis |

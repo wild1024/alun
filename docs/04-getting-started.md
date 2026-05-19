@@ -289,6 +289,16 @@ workers = 4
 [custom]
 # 插件运行时可通过 ConfigManager::get_dynamic() / set_dynamic() 读写
 
+# ==================== 文件存储 ====================
+[fs]
+default_backend_type = "local"   # 默认后端：local | minio | s3
+local_root_dir = "uploads"       # 本地存储根目录
+max_file_size_bytes = 52428800   # 上传文件大小上限（字节），默认 50MB
+presign_url_ttl_secs = 3600      # 预签名 URL 有效期（秒）
+
+# MinIO / S3 后端的连接信息（从业务存储桶表动态加载，也可在此声明）
+# 示例：sys_storage_bucket 表中按 backend_type 拉取 endpoint/access_key/secret_key/region
+
 # ==================== 异步任务 ====================
 [task]
 brokers = "localhost:9092"       # Kafka broker 地址
@@ -685,7 +695,21 @@ Date::relative(now.timestamp()); // → "3分钟前"
 // ── 脱敏 ──
 Mask::mobile("13812345678"); // → "138****5678"
 Mask::email("a@b.com");     // → "a***@b.com"
+Mask::id_card("320112199001011234"); // → "3201****1234"
 Mask::name("张三丰");        // → "张**"
+Mask::bank_card("6222021234567890"); // → "6222 **** 7890"
+Mask::user_id("user_abc123"); // → "us****23"
+Mask::password("secret");    // → "******"
+Mask::address("北京市海淀区中关村"); // → "北京市海淀****"
+Mask::license_plate("京A12345"); // → "京****5"
+Mask::mask_by_type("mobile", "13812345678"); // 按类型自动选择
+
+// ── User-Agent 解析 ──
+use alun_utils::parse_user_agent;
+let info = parse_user_agent("Mozilla/5.0 ... Chrome/120.0");
+info.device_type;   // → "PC"
+info.browser_type;  // → "Chrome"
+info.os_type;       // → "Windows"
 
 // ── ID ──
 Sid::uuid();  // UUID v4
@@ -697,12 +721,29 @@ Sid::tiny();  // 8位hex
 // ── 验证 ──
 Valid::is_email("a@b.com");
 Valid::is_mobile("13812345678");
+Valid::is_phone("+8613812345678");
+Valid::is_url("https://example.com");
+Valid::is_ipv4("192.168.1.1");
 Valid::is_strong_password("Abc@12345");
+Valid::is_username("john_doe");
+Valid::is_color("#FF00AA");
+Valid::is_uuid("550e8400-e29b-41d4-a716-446655440000");
+Valid::is_id_card("110101199003077758");
+Valid::is_date("2024-01-01");
+Valid::is_datetime("2024-01-01T00:00:00Z");
+Valid::is_json(r#"{"key": 1}"#);
+Valid::is_base64("SGVsbG8=");
+Valid::is_digits("123456");
+Valid::is_alphanumeric("abc123");
+Valid::len_between("hello", 2, 10);
+Valid::has_html("<div>hello</div>");
+Valid::is_html_free("plain text");
+Valid::is_file_extension("photo.jpg", &["jpg", "png"]);
 
 // ── 加密 ──
 Crypto::sha256("data");
-Crypto::hash_password("pass123");
-Crypto::verify_password("pass123", &hash)?;
+Crypto::hash_password("pass123");       // Argon2 哈希
+Crypto::verify_password("pass123", &hash)?;  // 自动检测 Argon2/BCrypt 算法
 Crypto::random_key();
 Crypto::random_token(32);
 
@@ -838,6 +879,7 @@ async fn create_order(db: &Db, req: CreateOrderReq) -> Result<Order, Error> { ..
 
 ```rust
 use validator::Validate;
+use alun::validate_uuid;
 
 #[derive(Debug, Deserialize, Validate)]
 struct CreateUserReq {
@@ -852,6 +894,22 @@ async fn create(ValidatedJson(req): ValidatedJson<CreateUserReq>) -> Result<Res<
         .map_err(|e| ApiError::unprocessable_entity(e.to_string()))?;
     let user = save_user(req).await?;
     Ok(Res::ok(user))
+}
+
+// 使用 ValidateExt + 自定义校验函数 —— 推荐方式
+#[derive(Debug, Deserialize, Validate)]
+struct RegisterReq {
+    #[validate(email)]
+    email: String,
+    #[validate(custom(function = "validate_password_strength"))]
+    password: String,
+    #[validate(custom(function = "validate_uuid"))]
+    invite_id: String,
+}
+
+async fn register(ValidatedJson(req): ValidatedJson<RegisterReq>) -> Result<Res<String>, ApiError> {
+    req.validate_or_reject()?; // 一行完成所有字段校验，失败自动返回 422
+    Ok(Res::ok("OK".into()))
 }
 ```
 
@@ -946,6 +1004,9 @@ alun = { default-features = false, features = ["db", "cache"] }
 # Web + DB + Cache + Template
 alun = { default-features = false, features = ["db", "cache", "template"] }
 
+# Web + 文件存储（本地 / MinIO / S3）
+alun = { default-features = false, features = ["fs"] }
+
 # Web + 异步任务（Kafka 驱动）
 alun = { default-features = false, features = ["task"] }
 
@@ -984,10 +1045,14 @@ async fn download(Path(name): Path<String>) -> Res<String> {
 }
 
 // ── 配合 alun_fs 使用 ──
-use alun_fs::LocalFs;
+// FsPlugin 统一管理存储后端，一行创建本地存储
+use alun_fs::FsPlugin;
 
-let fs = LocalFs::new(upload_path());
-let meta = fs.write_with_name("report.pdf", &data).await?;
+let plugin = FsPlugin::new_local(upload_path());
+let meta = plugin.write("report.pdf", &data).await?;
+
+// 多后端示例：按 backend_type 路由
+let meta = plugin.write_to(Some("minio"), "report.pdf", &data).await?;
 ```
 
 ### 10.17 静态文件服务

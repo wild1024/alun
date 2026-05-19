@@ -68,6 +68,8 @@ pub use alun_web::resources::{render_template, try_template, set_template};
 
 pub use alun_db::{Db, Row, IdKind};
 pub use alun_web::{App, AlunRouter, TokenClaims, TokenType, UserId, AuthClaims, ValidatedJson, JWT, ROUTES, PermissionDef, PERMISSION_ROUTES, NoAuthDef, NO_AUTH_ROUTES};
+pub use alun_web::{validate_uuid, validate_mobile, validate_password_strength, validate_id_card, validate_date, validate_email, validate_url, validate_datetime};
+pub use alun_web::ValidateExt;
 pub use alun_config::AppConfig;
 
 pub use linkme::distributed_slice;
