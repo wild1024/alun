@@ -140,7 +140,8 @@ Execution order: SecurityHeaders → RequestLog → RequestId → CORS → Compr
 ## Plugins → see `references/plugins.md`
 
 `#[async_trait] impl Plugin for MyPlugin { fn name(), start(), stop(), depends_on() }`
-- Built-in: `CachePlugin`, `SchedulerPlugin` (cron), `NotificationPlugin` (SMTP), `AsyncTaskPlugin`, `SerialPlugin`
+- Built-in: `CachePlugin`, `SchedulerPlugin` (cron), `NotificationPlugin` (SMTP), `AsyncTaskPlugin` (semaphore pool), `SerialPlugin` (分布式单号生成)
+- `SerialPlugin` 支持内存/Redis/PG 三种后端，遵循 `TaskPlugin` 薄封装模式，持久化逻辑通过 `Arc<dyn SerialGenerator>` 委托
 - Register: `App::new()?.plugin(MyPlugin).scan().start()`
 
 ## Caching & Templates → see `references/plugins.md`
@@ -186,7 +187,8 @@ uploads/ downloads/
 | Config | `cfg()`, `config()`, `ALUN_*` env vars |
 | Cache | `cache()`, `Cache` trait, `LocalCache`, `SharedCache` |
 | Plugins | `Plugin` trait, `#[plugin]`, `SchedulerPlugin` |
-| Utils | `Mask`, `Sid`, `Valid`, `Crypto`, `Date`, `Export` |
+| Utils | `Mask`, `Sid`, `Valid`, `Crypto`, `Date`, `Export`, `SerialRule`, `SerialGenerator` |
 | Task | `#[task_handler]`, `TaskHandler`, `TaskStorage`, `TaskPlugin` |
+| Serial | `SerialPlugin`, `SerialRule`, `SerialGenerator`, `MemorySerialBackend` |
 
 Error codes: `OK=0`, `BAD_REQUEST=400`, `UNAUTHORIZED=401`, `FORBIDDEN=403`, `NOT_FOUND=404`, `CONFLICT=409`, `UNPROCESSABLE_ENTITY=422`, `TOO_MANY_REQUESTS=429`, `INTERNAL=500`, `SERVICE_UNAVAILABLE=503`

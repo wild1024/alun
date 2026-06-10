@@ -91,6 +91,37 @@ async fn create(ValidatedJson(req): ValidatedJson<CreateUserReq>) -> Result<Res<
 }
 ```
 
+### Custom Validator Functions
+
+Alun provides pre-built validator functions for common field types. Use with `#[validate(custom(function = "..."))]`:
+
+| Function | Description | Empty field |
+|----------|-------------|-------------|
+| `validate_uuid` | UUID v1~v7 format | Skips |
+| `validate_mobile` | China mobile/landline | Skips |
+| `validate_password_strength` | 8+ chars, upper+lower+digit+special | **Always** |
+| `validate_id_card` | China 18-digit ID (with check digit) | Skips |
+| `validate_date` | YYYY-MM-DD format | Skips |
+| `validate_datetime` | ISO 8601 / RFC 3339 | Skips |
+| `validate_date_or_datetime` | YYYY-MM-DD **or** ISO 8601/RFC 3339 | Skips |
+| `validate_email` | Email format | Skips |
+| `validate_url` | HTTP/HTTPS URL | Skips |
+
+```rust
+#[derive(Debug, Deserialize, Validate)]
+struct EventReq {
+    #[validate(custom(function = "validate_uuid"))]
+    pub id: String,
+
+    #[validate(custom(function = "validate_date_or_datetime"))]
+    pub release_date: Option<String>,  // 支持纯日期或完整时间戳
+}
+
+// 手动验证
+use alun::ValidateExt;
+req.validate_or_reject()?;  // 失败返回 ApiError(422)
+```
+
 ## Unified Response (`Res<T>`)
 
 All handlers return `Res<T>` (always success) or `Result<Res<T>, ApiError>` (may fail):

@@ -87,9 +87,28 @@ backend = "memory"     # memory | redis | custom
 [[plugins.serial.rules]]
 key = "order"
 format = "ORD{YYYY}{MM}{DD}{SEQ:8}"
-cycle = "daily"
+cycle = "daily"        # no_cycle | daily | monthly | yearly
 initial_value = 1
-step = "sequential"
+step = "sequential"    # sequential | random:N (如 random:100)
 ```
 
-Each plugin has its own sub-config section (e.g., `[plugins.scheduler]`, `[plugins.serial]`).
+| `SerialRuleConfig` 字段 | 类型 | 默认值 | 说明 |
+|-------------------------|------|--------|------|
+| `key` | String | - | 规则唯一标识（必填） |
+| `format` | String | - | 格式模板（必填），如 `ORD{YYYY}{MM}{DD}{SEQ:8}` |
+| `cycle` | String | `"no_cycle"` | 循环周期：`no_cycle` / `daily` / `monthly` / `yearly` |
+| `initial_value` | u64 | `1` | 计数器初始值 |
+| `step` | String | `"sequential"` | 增量策略：`sequential` 或 `random:N`（如 `random:100`） |
+
+### 格式模板语法
+
+| 占位符 | 输出 | 示例 |
+|--------|------|------|
+| `{YYYY}` | 4位年份 | 2026 |
+| `{YY}` | 2位年份 | 26 |
+| `{MM}` | 2位月份 | 06 |
+| `{DD}` | 2位日期 | 11 |
+| `{SEQ:N}` | N位补零序号 | `{SEQ:6}` → 000001 |
+| `{RAND:N}` | N位随机数 | `{RAND:4}` → 5821 |
+| `{TS}` | Unix时间戳（秒） | 1716537600 |
+| `{TSMS}` | Unix时间戳（毫秒） | 1716537600123 |

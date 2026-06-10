@@ -66,6 +66,9 @@ pool.submit(async { heavy_work().await; });
 ```
 
 **SerialPlugin** (serial number generator):
+
+遵循 `TaskPlugin` 薄封装模式——插件不持有数据库连接或 SQL，持久化逻辑通过 `Arc<dyn SerialGenerator>` 委托给业务方。
+
 ```toml
 # config.toml
 [plugins.serial]
@@ -74,25 +77,41 @@ backend = "memory"           # memory | redis | custom
 [[plugins.serial.rules]]
 key = "order"
 format = "ORD{YYYY}{MM}{DD}{SEQ:8}"
-cycle = "daily"              # nocycle | daily | monthly | yearly
+cycle = "daily"              # no_cycle | daily | monthly | yearly
 initial_value = 1
-step = "sequential"           # sequential | random
+step = "sequential"          # sequential | random:N
 ```
+
 ```rust
 use alun_plugin::SerialPlugin;
+use alun_utils::{SerialRule, SerialGenerator, CyclePeriod};
 
-// 运行时注册规则
-let plugin = SerialPlugin::new(config);
-plugin.register_rule(SerialRule {
-    key: "order".into(),
-    format: "ORD{YYYY}{MM}{DD}{SEQ:8}".into(),
-    cycle: CyclePeriod::Daily,
-    ..Default::default()
-}).await?;
+// 方式一：零配置 Memory 后端
+let plugin = SerialPlugin::with_memory(config);
+app.plugin(plugin).scan().start().await;
 
-// 生成单号
-let no = plugin.generate("order").await?;  // → "ORD2026061000000001"
+// 方式二：自定义后端（Redis/PG/业务自定义）
+let backend: Arc<dyn SerialGenerator> = Arc::new(MyRedisSerialBackend::new(redis_conn));
+let plugin = SerialPlugin::new(cfg.plugins.serial, backend);
+app.plugin(plugin).scan().start().await;
+
+// 在 Handler 中通过 Extension 获取
+#[alun::get("/api/serial/next/{rule_key}")]
+async fn next_serial(
+    Extension(plugin): Extension<SerialPlugin>,
+    Path(rule_key): Path<String>,
+) -> Result<Res<String>, ApiError> {
+    let no = plugin.generator().generate(&rule_key).await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Res::ok(no))
+}
 ```
+
+| `SerialPlugin` 方法 | 说明 |
+|---------------------|------|
+| `SerialPlugin::new(config, generator)` | 使用自定义生成器创建（推荐） |
+| `SerialPlugin::with_memory(config)` | 零配置内存后端（默认） |
+| `plugin.generator()` | 获取 `Arc<dyn SerialGenerator>` 引用（需在 start 后调用） |
 
 ## Registering Custom Plugins
 
