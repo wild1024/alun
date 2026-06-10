@@ -11,6 +11,8 @@ access_token_expire_secs = 7200
 refresh_token_expire_secs = 604800
 ```
 
+> `ignore_paths` 支持精确匹配和**前缀匹配**：若配置 `/api`，则 `/api/login`、`/api/user/info` 等所有以 `/api/` 开头的路径均被忽略认证。
+
 ## JWT Manager
 
 ```rust

@@ -70,13 +70,92 @@ macro_rules! impl_db_ops {
                         if let Some(n) = Number::from_f64(v) {
                             r.data.insert(name, Value::Number(n));
                         }
+                    } else if let Ok(v) = row.try_get::<sqlx::types::BigDecimal, usize>(idx) {
+                        let s = v.to_string();
+                        if let Ok(n) = s.parse::<serde_json::Number>() {
+                            r.data.insert(name, Value::Number(n));
+                        }
                     } else if let Ok(v) = row.try_get::<bool, usize>(idx) {
                         r.data.insert(name, Value::Bool(v));
                     } else if let Ok(v) = row.try_get::<serde_json::Value, usize>(idx) {
                         r.data.insert(name, v);
                     }
                 }
-                r.mark_all_changed();
+                r
+            }
+
+            async fn [<query_one_ $pool_ty:snake>](
+                pool: &$pool_ty, sql: &str, params: &[&str],
+            ) -> DbResult<Option<Row>> {
+                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
+                for p in params { q = q.bind(*p); }
+                Ok(q.fetch_optional(pool).await?.as_ref()
+                    .map([<typed_row_to_row_ $db_mod:snake>]))
+            }
+
+            async fn [<query_all_ $pool_ty:snake>](
+                pool: &$pool_ty, sql: &str, params: &[&str],
+            ) -> DbResult<Vec<Row>> {
+                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
+                for p in params { q = q.bind(*p); }
+                let rows = q.fetch_all(pool).await?;
+                Ok(rows.iter().map([<typed_row_to_row_ $db_mod:snake>]).collect())
+            }
+
+            async fn [<count_ $pool_ty:snake>](
+                pool: &$pool_ty, sql: &str, params: &[&str],
+            ) -> DbResult<u64> {
+                let mut q = sqlx::query_scalar::<sqlx::$db_mod, i64>(sql);
+                for p in params { q = q.bind(*p); }
+                Ok(q.fetch_optional(pool).await?.unwrap_or(0) as u64)
+            }
+
+            async fn [<execute_ $pool_ty:snake>](
+                pool: &$pool_ty, sql: &str, params: &[&str],
+            ) -> DbResult<u64> {
+                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
+                for p in params { q = q.bind(*p); }
+                q.execute(pool).await.map_err(DbError::from).map(|r| r.rows_affected())
+            }
+        }
+    };
+}
+
+/// 为不支持 BigDecimal 的数据库类型（SQLite）生成后端查询/写入函数
+macro_rules! impl_db_ops_no_bigdecimal {
+    ($pool_ty:ty, $db_mod:ident) => {
+        paste::paste! {
+            fn [<typed_row_to_row_ $db_mod:snake>](
+                row: &<sqlx::$db_mod as sqlx::Database>::Row
+            ) -> Row {
+                use chrono::{DateTime, Utc};
+
+                let mut r = Row::default();
+                for col in row.columns() {
+                    let name = col.name().to_string();
+                    let idx: usize = col.ordinal();
+                    if let Ok(v) = row.try_get::<i64, usize>(idx) {
+                        r.data.insert(name, Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<i32, usize>(idx) {
+                        r.data.insert(name, Value::Number((v as i64).into()));
+                    } else if let Ok(v) = row.try_get::<i16, usize>(idx) {
+                        r.data.insert(name, Value::Number((v as i64).into()));
+                    } else if let Ok(v) = row.try_get::<String, usize>(idx) {
+                        r.data.insert(name, Value::String(v));
+                    } else if let Ok(v) = row.try_get::<sqlx::types::Uuid, usize>(idx) {
+                        r.data.insert(name, Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<DateTime<Utc>, usize>(idx) {
+                        r.data.insert(name, Value::String(v.to_rfc3339()));
+                    } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
+                        if let Some(n) = Number::from_f64(v) {
+                            r.data.insert(name, Value::Number(n));
+                        }
+                    } else if let Ok(v) = row.try_get::<bool, usize>(idx) {
+                        r.data.insert(name, Value::Bool(v));
+                    } else if let Ok(v) = row.try_get::<serde_json::Value, usize>(idx) {
+                        r.data.insert(name, v);
+                    }
+                }
                 r
             }
 
@@ -119,7 +198,8 @@ macro_rules! impl_db_ops {
 
 impl_db_ops!(PgPool, Postgres);
 impl_db_ops!(MySqlPool, MySql);
-impl_db_ops!(SqlitePool, Sqlite);
+// SQLite 不支持 BigDecimal 类型，使用不含 BigDecimal 处理的变体
+impl_db_ops_no_bigdecimal!(SqlitePool, Sqlite);
 
 async fn query_one_any(pool: &AnyPool, sql: &str, params: &[&str]) -> DbResult<Option<Row>> {
     let mut q = sqlx::query(sql);
@@ -153,7 +233,6 @@ fn typed_row_to_row_any(row: &sqlx::any::AnyRow) -> Row {
             r.data.insert(name, Value::Bool(v));
         }
     }
-    r.mark_all_changed();
     r
 }
 
@@ -323,29 +402,48 @@ impl Db {
     ///
     /// 仅更新 `changes` 中标记的字段，主键必须存在于 `data` 中。
     /// PostgreSQL 使用 `RETURNING *` 返回更新后的行。
+    ///
+    /// 对 `Value::Null` 字段生成 `column = NULL`，不占用参数占位符。
     pub async fn update(&self, row: &Row) -> DbResult<Option<Row>> {
         let table = row.table.as_deref().ok_or(DbError::Argument("Row 缺少表名".into()))?;
-        let sets: Vec<String> = row.changes.iter().enumerate()
-            .map(|(i, col)| {
-                let cast = row.data.get(col).map(|v| value_cast(v)).unwrap_or("");
-                format!("{} = ${}{}", col, i + 1, cast)
-            }).collect();
+
+        // 构建 SET 子句：非 null 值使用参数占位符，null 值直接写 NULL
+        let mut sets: Vec<String> = Vec::with_capacity(row.changes.len());
+        let mut params: Vec<String> = Vec::with_capacity(row.changes.len() + 1);
+        let mut param_idx = 0usize;
+
+        for col in &row.changes {
+            if let Some(value) = row.data.get(col) {
+                if value.is_null() {
+                    sets.push(format!("{} = NULL", col));
+                } else {
+                    param_idx += 1;
+                    let cast = value_cast(value);
+                    sets.push(format!("{} = ${}{}", col, param_idx, cast));
+                    params.push(value_to_string(value));
+                }
+            }
+        }
+
+        if sets.is_empty() {
+            return Err(DbError::Argument("没有要更新的字段".into()));
+        }
+
         let pk = row.primary_keys.first().map(|s| s.as_str()).unwrap_or("id");
         let id_value = row.data.get(pk).ok_or(DbError::Argument("Row 缺少主键".into()))?;
 
-        let mut params: Vec<String> = row.changes.iter()
-            .filter_map(|c| row.data.get(c)).map(value_to_string).collect();
+        let where_param_idx = param_idx + 1;
         params.push(value_to_string(id_value));
         let val_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
 
         let id_cast_sql = id_cast(id_value);
         if matches!(&self.pool, DbPool::Postgres(_)) {
             let sql = format!("UPDATE {} SET {} WHERE {}=${}{} RETURNING *",
-                table, sets.join(", "), pk, row.changes.len() + 1, id_cast_sql);
+                table, sets.join(", "), pk, where_param_idx, id_cast_sql);
             self.query_one(&sql, &val_refs).await
         } else {
             let sql = format!("UPDATE {} SET {} WHERE {}=${}{}",
-                table, sets.join(", "), pk, row.changes.len() + 1, id_cast_sql);
+                table, sets.join(", "), pk, where_param_idx, id_cast_sql);
             let n = self.execute(&sql, &val_refs).await?;
             if n > 0 { self.find_by_id(table, id_value.clone()).await } else { Ok(None) }
         }

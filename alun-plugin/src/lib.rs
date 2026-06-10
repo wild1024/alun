@@ -10,6 +10,7 @@ pub mod cache_plugin;
 pub mod async_task;
 pub mod scheduler;
 pub mod sid_plugin;
+pub mod serial_plugin;
 
 use alun_core::PluginManager;
 use alun_config::AppConfig;
@@ -41,7 +42,7 @@ pub fn create_plugins_from_config(config: &AppConfig) -> PluginManager {
                 info!("插件: scheduler 已注册");
             }
             "cache" => {
-                let p = cache_plugin::CachePlugin::new(&config.cache, &config.redis);
+                let p = cache_plugin::CachePlugin::new(&config.app_name, &config.cache, &config.redis);
                 mgr = mgr.add(p);
                 info!("插件: cache 已注册");
             }
@@ -49,6 +50,13 @@ pub fn create_plugins_from_config(config: &AppConfig) -> PluginManager {
                 let p = sid_plugin::SidPlugin::new();
                 mgr = mgr.add(p);
                 info!("插件: sid 已注册");
+            }
+            "serial" => {
+                let p = serial_plugin::SerialPlugin::with_memory(
+                    plugins_cfg.serial.clone(),
+                );
+                mgr = mgr.add(p);
+                info!("插件: serial 已注册（memory 后端）");
             }
             _ => {
                 tracing::warn!("未知插件: {}，跳过", name);

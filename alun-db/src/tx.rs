@@ -160,7 +160,6 @@ macro_rules! tx_row_convert {
                     r.data.insert(name, Value::Bool(v));
                 }
             }
-            r.mark_all_changed();
             r
         }
     };

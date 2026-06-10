@@ -47,10 +47,10 @@ The alun workspace consists of 14 crates:
 | **Infrastructure** | `alun-config` | TOML config, multi-profile, `ALUN_*` env overrides, runtime dynamic config. |
 | | `alun-log` | tracing init (text/json/file). |
 | | `alun-macros` | Proc macros: `#[get]`, `#[post]`, `#[put]`, `#[delete]`, `#[controller]`, `#[plugin]`, etc. |
-| | `alun-utils` | 200+ utilities: strings, dates, masking, IDs, validation, crypto, export, XSS. |
+| | `alun-utils` | 200+ utilities: strings, dates, masking, IDs, validation, crypto, export, XSS, serial number generation. |
 | **Extensions** | `alun-cache` | `Cache` trait, `LocalCache`, `SharedCache` (Local/Redis). |
 | | `alun-template` | minijinja (Jinja2) template engine. |
-| | `alun-plugin` | Built-in plugins: cache, notification (SMTP), async-task, scheduler (cron). |
+| | `alun-plugin` | Built-in plugins: cache, notification (SMTP), async-task, scheduler (cron), serial number generator. |
 | | `alun-kafka` | Kafka producer/consumer (rdkafka). |
 | | `alun-task` | Kafka-driven distributed async task engine with retry/DLQ. |
 | | `alun-fs` | Local file system abstraction. |
@@ -140,7 +140,7 @@ Execution order: SecurityHeaders → RequestLog → RequestId → CORS → Compr
 ## Plugins → see `references/plugins.md`
 
 `#[async_trait] impl Plugin for MyPlugin { fn name(), start(), stop(), depends_on() }`
-- Built-in: `CachePlugin`, `SchedulerPlugin` (cron), `NotificationPlugin` (SMTP), `AsyncTaskPlugin`
+- Built-in: `CachePlugin`, `SchedulerPlugin` (cron), `NotificationPlugin` (SMTP), `AsyncTaskPlugin`, `SerialPlugin`
 - Register: `App::new()?.plugin(MyPlugin).scan().start()`
 
 ## Caching & Templates → see `references/plugins.md`

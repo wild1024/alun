@@ -1,7 +1,7 @@
 [package]
 name = "alun-cache"
 description = "Alun cache abstraction: local in-memory cache + Redis integration"
-version.workspace = true
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

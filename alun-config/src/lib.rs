@@ -505,6 +505,10 @@ pub struct PluginsConfig {
     /// 定时任务插件
     #[serde(default)]
     pub scheduler: SchedulerConfig,
+
+    /// 单号生成器插件
+    #[serde(default)]
+    pub serial: SerialConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -547,6 +551,47 @@ pub struct SchedulerConfig {
     #[serde(default = "default_workers")]
     pub workers: usize,
 }
+
+/// 单号生成器配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerialConfig {
+    /// 后端类型："memory"（默认）、"redis"、"postgres"
+    #[serde(default = "default_serial_backend")]
+    pub backend: String,
+    /// 静态规则列表
+    #[serde(default)]
+    pub rules: Vec<SerialRuleConfig>,
+}
+
+impl Default for SerialConfig {
+    fn default() -> Self {
+        Self { backend: "memory".into(), rules: Vec::new() }
+    }
+}
+
+fn default_serial_backend() -> String { "memory".into() }
+
+/// 单号规则配置（TOML 可序列化）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerialRuleConfig {
+    /// 规则唯一标识
+    pub key: String,
+    /// 单号格式，如 "ORD{YYYY}{MM}{DD}{SEQ:8}"
+    pub format: String,
+    /// 循环周期："no_cycle"、"daily"、"monthly"、"yearly"
+    #[serde(default = "default_cycle")]
+    pub cycle: String,
+    /// 计数器初始值
+    #[serde(default = "default_initial")]
+    pub initial_value: u64,
+    /// 增量策略："sequential"（默认）或 "random:max"
+    #[serde(default = "default_step_strategy")]
+    pub step: String,
+}
+
+fn default_cycle() -> String { "no_cycle".into() }
+fn default_initial() -> u64 { 1 }
+fn default_step_strategy() -> String { "sequential".into() }
 
 // ──── 默认值函数 ────────────────────────────────────
 
@@ -677,7 +722,7 @@ impl Default for UploadConfig { fn default() -> Self { Self { path: default_uplo
 impl Default for DownloadConfig { fn default() -> Self { Self { path: default_download_path() } } }
 impl Default for TemplateConfig { fn default() -> Self { Self { path: default_template_path() } } }
 impl Default for StaticConfig { fn default() -> Self { Self { path: default_static_path(), enabled: false } } }
-impl Default for PluginsConfig { fn default() -> Self { Self { enabled: vec![], notification: NotificationConfig::default(), async_task: AsyncTaskConfig::default(), scheduler: SchedulerConfig::default() } } }
+impl Default for PluginsConfig { fn default() -> Self { Self { enabled: vec![], notification: NotificationConfig::default(), async_task: AsyncTaskConfig::default(), scheduler: SchedulerConfig::default(), serial: SerialConfig::default() } } }
 
 // ──── 配置管理器 ────────────────────────────────────
 

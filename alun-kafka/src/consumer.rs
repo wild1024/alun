@@ -22,6 +22,7 @@ impl KafkaConsumer {
             .set("group.id", group_id)
             .set("enable.auto.commit", "true")
             .set("auto.offset.reset", "earliest")
+            .set("allow.auto.create.topics", "true")
             .create()
             .expect("Kafka Consumer 创建失败");
 

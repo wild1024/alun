@@ -60,11 +60,13 @@ impl TaskPlugin {
         storage: Arc<dyn TaskStorage>,
         registry: HandlerRegistry,
     ) -> Result<Self, String> {
-        let topics: Vec<String> = registry
+        let mut topics: Vec<String> = registry
             .task_types()
             .iter()
             .filter_map(|tt| registry.get_config(*tt).map(|c| c.topic.clone()))
             .collect();
+        topics.sort_unstable();
+        topics.dedup();
 
         let metrics = Arc::new(TaskMetrics::new());
 
@@ -134,23 +136,16 @@ impl Plugin for TaskPlugin {
                 let w_config_clone = w_config.clone();
                 let w_storage_clone = Arc::clone(&w_storage);
                 let w_registry_clone = w_registry.clone();
-                let worker = match tokio::task::spawn_blocking(move || {
-                    TaskWorker::new(w_config_clone, w_storage_clone, w_registry_clone, w_metrics)
-                }).await
-                {
-                    Ok(Ok(w)) => Arc::new(w),
-                    Ok(Err(e)) => {
-                        error!("TaskWorker 创建失败: {}", e);
-                        return;
-                    }
+                let worker = match TaskWorker::new(w_config_clone, w_storage_clone, w_registry_clone, w_metrics, &w_topics) {
+                    Ok(w) => Arc::new(w),
                     Err(e) => {
-                        error!("TaskWorker 创建失败 (join error): {}", e);
+                        error!("TaskWorker 创建失败: {}", e);
                         return;
                     }
                 };
 
                 let worker_ref = Arc::clone(&worker);
-                let run_fut = worker_ref.run(&w_topics);
+                let run_fut = worker_ref.run();
 
                 tokio::select! {
                     result = run_fut => {

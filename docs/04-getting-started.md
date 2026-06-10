@@ -269,7 +269,7 @@ path = "static"
 
 # ==================== 插件 ====================
 [plugins]
-enabled = []                 # 按需: cache, notification, async-task, scheduler
+enabled = []                 # 按需: cache, notification, async-task, scheduler, serial
 
 [plugins.notification]
 smtp_host = ""
@@ -284,6 +284,9 @@ workers = 4
 
 [plugins.scheduler]
 workers = 4
+
+[plugins.serial]
+backend = "memory"             # memory | redis | custom
 
 # ==================== 自定义配置 ====================
 [custom]
@@ -627,7 +630,7 @@ async fn handler() -> Res<String> {
 }
 
 // 手动创建
-let cache = alun_cache::create_cache(&cfg().cache, &cfg().redis).await?;
+let cache = alun_cache::create_cache("my-app", &cfg().cache, &cfg().redis).await?;
 cache.set("k", "v").await?;           // 永不过期
 cache.set_ex("k", "v", 300).await?;   // 5分钟过期
 let v: Option<String> = cache.get("k").await?;

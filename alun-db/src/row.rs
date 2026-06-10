@@ -121,6 +121,11 @@ impl Row {
         self.changes = self.data.keys().cloned().collect();
     }
 
+    /// 清除变更追踪，使后续 `set()` 调用只包含新设置的字段
+    pub fn clear_changes(&mut self) {
+        self.changes.clear();
+    }
+
     /// 判断某个字段是否存在（含值为 null）
     pub fn has(&self, key: &str) -> bool {
         self.data.contains_key(key)

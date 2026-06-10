@@ -28,7 +28,7 @@ impl Plugin for MyPlugin {
 Enable via config:
 ```toml
 [plugins]
-enabled = ["cache", "notification", "async-task", "scheduler"]
+enabled = ["cache", "notification", "async-task", "scheduler", "serial"]
 ```
 
 **CachePlugin**: Auto-creates `SharedCache` (Local/Redis). Access via `cache()`.
@@ -63,6 +63,35 @@ use alun_plugin::async_task::AsyncTaskPlugin;
 
 let pool = AsyncTaskPlugin::new(4);  // 4 workers
 pool.submit(async { heavy_work().await; });
+```
+
+**SerialPlugin** (serial number generator):
+```toml
+# config.toml
+[plugins.serial]
+backend = "memory"           # memory | redis | custom
+
+[[plugins.serial.rules]]
+key = "order"
+format = "ORD{YYYY}{MM}{DD}{SEQ:8}"
+cycle = "daily"              # nocycle | daily | monthly | yearly
+initial_value = 1
+step = "sequential"           # sequential | random
+```
+```rust
+use alun_plugin::SerialPlugin;
+
+// 运行时注册规则
+let plugin = SerialPlugin::new(config);
+plugin.register_rule(SerialRule {
+    key: "order".into(),
+    format: "ORD{YYYY}{MM}{DD}{SEQ:8}".into(),
+    cycle: CyclePeriod::Daily,
+    ..Default::default()
+}).await?;
+
+// 生成单号
+let no = plugin.generate("order").await?;  // → "ORD2026061000000001"
 ```
 
 ## Registering Custom Plugins
@@ -124,11 +153,11 @@ try_cache()  // Option<&SharedCache>
 ```rust
 use alun_cache::{create_cache, Cache, LocalCache};
 
-let local = LocalCache::new(10000, 3600);  // Capacity 10000, default TTL 3600s
+let local = LocalCache::new("my-app", 10000, 3600);  // app前缀, 容量10000, 默认TTL 3600s
 local.set("key", "value").await?;
 
 // From config
-let cache = alun_cache::create_cache(&cfg().cache, &cfg().redis).await?;
+let cache = alun_cache::create_cache("my-app", &cfg().cache, &cfg().redis).await?;
 ```
 
 ### Cache Types

@@ -561,7 +561,7 @@ impl App {
 
         #[cfg(feature = "cache")]
         if cfg.cache.r#type != "local" || cfg.cache.max_capacity > 0 {
-            match alun_cache::create_cache(&cfg.cache, &cfg.redis).await {
+            match alun_cache::create_cache(&cfg.app_name, &cfg.cache, &cfg.redis).await {
                 Ok(c) => {
                     set_cache(c).map_err(|e| alun_core::Error::Config(e.to_string()))?;
                 }

@@ -50,13 +50,13 @@ Alun 不是 aifei（Java Web 框架）的代码翻译，而是 aifei **设计理
 |-------|------|------|
 | `alun-config` | TOML 配置加载、多环境 Profile、动态配置 | 基础设施 |
 | `alun-log` | tracing 日志初始化（text/json/文件） | 基础设施 |
-| `alun-utils` | 字符串、日期、脱敏、ID、验证、加密、导出、清理、格式化、随机生成等工具 | 基础设施 |
+| `alun-utils` | 字符串、日期、脱敏、ID、验证、加密、导出、清理、格式化、随机生成、单号生成等工具 | 基础设施 |
 | `alun-macros` | Proc Macro（路由注解 `#[get]`/`#[post]`、`#[controller]`、`#[plugin]`） | 基础设施 |
 | `alun-web` | App 构建器、路由注册器、中间件体系、JWT 管理、全局资源 | 核心功能 |
 | `alun-db` | 数据库连接池、Row CRUD、事务、Hook、迁移、SQL 模板 | 核心功能 |
 | `alun-cache` | 缓存抽象 Trait + LocalCache + RedisCache 实现 | 核心功能 |
 | `alun-template` | minijinja 模板引擎封装 | 核心功能 |
-| `alun-plugin` | 内置插件实现（通知/缓存/异步任务/定时任务/SID） | 扩展功能 |
+| `alun-plugin` | 内置插件实现（通知/缓存/异步任务/定时任务/单号生成/SID） | 扩展功能 |
 | `alun-kafka` | Kafka 生产者/消费者（基于 rdkafka） | 扩展功能 |
 | `alun-task` | 异步任务框架（Kafka 驱动、宏注册、泛型存储、DLQ） | 扩展功能 |
 | `alun-fs` | 文件系统抽象（多后端存储：本地/MinIO/S3） | 扩展功能 |

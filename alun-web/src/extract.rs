@@ -269,6 +269,29 @@ pub fn validate_datetime(value: &str) -> Result<(), ValidationError> {
     }
 }
 
+/// 验证日期（YYYY-MM-DD）或日期时间格式（ISO 8601 / RFC 3339）
+///
+/// 用于允许纯日期（如 "2025-04-01"）和完整时间戳（如 "2025-04-01T00:00:00Z"）混合的字段校验。
+/// 使用方式：
+///
+/// ```ignore
+/// #[validate(custom(function = "validate_date_or_datetime"))]
+/// pub release_date: Option<String>,
+/// ```
+pub fn validate_date_or_datetime(value: &str) -> Result<(), ValidationError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if alun_utils::valid::Valid::is_datetime(value)
+        || alun_utils::valid::Valid::is_date(value)
+    {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid_date_or_datetime")
+            .with_message("日期格式必须为 YYYY-MM-DD 或 ISO 8601/RFC 3339".into()))
+    }
+}
+
 /// 为实现了 `Validate` 的类型提供便捷的校验方法
 ///
 /// 在 handler 中通过 `req.validate_or_reject()?;` 即可完成校验。

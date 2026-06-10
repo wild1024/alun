@@ -48,8 +48,8 @@ Mask::name("张三丰");                  // → 张**
 Sid::short();   // 16 hex chars
 Sid::tiny();    // 8 hex chars
 Sid::tsid();    // Timestamp + random
-Sid::uuid();    // UUID v4
-Sid::uuid7();   // UUID v7 (time-ordered, recommended for DB primary keys)
+Sid::uuid();    // UUID v4（36 字符标准格式，含连字符）
+Sid::uuid7();   // UUID v7（36 字符标准格式，含连字符，time-ordered, recommended for DB primary keys）
 ```
 
 ## Validation
@@ -82,6 +82,38 @@ let decrypted = Crypto::aes_decrypt(&encrypted, &key_hex)?;
 let csv = Export::to_csv(&["name", "age"], &records)?;
 let json = Export::to_json(&records)?;
 ```
+
+## Serial Number Generation (`alun-utils::serial`)
+
+```rust
+use alun_utils::{SerialRule, SerialGenerator, MemorySerialBackend, CyclePeriod, IncrementStrategy};
+
+// 创建内存后端
+let gen = MemorySerialBackend::new();
+
+// 注册规则
+gen.register_rule(SerialRule {
+    key: "order".into(),
+    format: "ORD{YYYY}{MM}{DD}{SEQ:8}".into(),
+    cycle: CyclePeriod::Daily,
+    initial_value: 1,
+    step: IncrementStrategy::Sequential,
+    is_enabled: true,
+}).await?;
+
+// 生成单号
+let no = gen.generate("order").await?;  // → "ORD2026061000000001"
+```
+
+| 方法 | 说明 |
+| ---- | ---- |
+| `SerialRule` | 单号规则定义：`key`（唯一标识）、`format`（格式模板）、`cycle`（循环周期）、`initial_value`、`step`、`is_enabled` |
+| `CyclePeriod` | 循环周期：`NoCycle`（永不重置）、`Daily`（按天）、`Monthly`（按月）、`Yearly`（按年） |
+| `IncrementStrategy` | 增量策略：`Sequential`（顺序递增）、`Random { max }`（随机跳动） |
+| `MemorySerialBackend` | 内存后端（进程内，适合单实例） |
+| `SerialError` | 单号错误类型：`RuleNotFound`、`RuleDisabled`、`FormatError`、`BackendError` |
+
+格式模板占位符：`{YYYY}` `{MM}` `{DD}` `{HH}` `{mm}` `{ss}`（日期时间）、`{SEQ:N}`（N 位补零序号）、`{RAND:N}`（N 位随机数）。
 
 ## XSS Sanitization (requires `features = ["xss"]`)
 

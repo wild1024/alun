@@ -9,8 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct Sid;
 
 impl Sid {
-    /// 32 位 UUID（无连字符）
-    pub fn uuid() -> String { Uuid::new_v4().simple().to_string() }
+    /// 标准格式 UUID（36 字符，含连字符）
+    pub fn uuid() -> String { Uuid::new_v4().to_string() }
 
     /// 短 ID（16 位 hex）
     pub fn short() -> String {
@@ -36,7 +36,7 @@ impl Sid {
 
     /// UUID v7（时间有序，更适合数据库主键）
     pub fn uuid7() -> String {
-        Uuid::now_v7().simple().to_string()
+        Uuid::now_v7().to_string()
     }
 }
 
@@ -48,5 +48,5 @@ mod tests {
     #[test]
     fn test_tiny() { assert_eq!(Sid::tiny().len(), 8); }
     #[test]
-    fn test_uuid() { assert_eq!(Sid::uuid().len(), 32); }
+    fn test_uuid() { assert_eq!(Sid::uuid().len(), 36); }
 }

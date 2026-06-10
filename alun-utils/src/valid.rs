@@ -151,9 +151,10 @@ impl Valid {
         chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
     }
 
-    /// 验证日期时间格式（ISO 8601 / RFC 3339）
+    /// 验证日期时间格式（ISO 8601 / RFC 3339 或 YYYY-MM-DD）
     pub fn is_datetime(s: &str) -> bool {
         chrono::DateTime::parse_from_rfc3339(s).is_ok()
+            || chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
     }
 
     // ---- JSON ----

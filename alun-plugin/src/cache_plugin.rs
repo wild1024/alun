@@ -23,6 +23,8 @@ use parking_lot::RwLock;
 /// 在 `start()` 时根据配置自动创建 LocalCache 或 RedisCache，
 /// `stop()` 时释放连接。
 pub struct CachePlugin {
+    /// 应用名称（用作缓存 key 前缀）
+    app_name: String,
     /// 缓存实例（运行时初始化）
     cache: RwLock<Option<SharedCache>>,
     /// 缓存配置
@@ -33,8 +35,11 @@ pub struct CachePlugin {
 
 impl CachePlugin {
     /// 创建缓存插件
-    pub fn new(cache_config: &alun_config::CacheConfig, redis_config: &alun_config::RedisConfig) -> Self {
+    ///
+    /// `app_name` 将作为所有缓存 key 的前缀。
+    pub fn new(app_name: &str, cache_config: &alun_config::CacheConfig, redis_config: &alun_config::RedisConfig) -> Self {
         Self {
+            app_name: app_name.to_string(),
             cache: RwLock::new(None),
             cache_config: cache_config.clone(),
             redis_config: redis_config.clone(),
@@ -52,7 +57,7 @@ impl Plugin for CachePlugin {
     fn name(&self) -> &str { "cache" }
 
     async fn start(&self) -> Result<()> {
-        let instance = alun_cache::create_cache(&self.cache_config, &self.redis_config).await?;
+        let instance = alun_cache::create_cache(&self.app_name, &self.cache_config, &self.redis_config).await?;
         *self.cache.write() = Some(instance);
         Ok(())
     }

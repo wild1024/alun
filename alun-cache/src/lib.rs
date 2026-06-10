@@ -85,6 +85,8 @@ pub struct CacheStats {
 /// 本地内存缓存（HashMap + RwLock + TTL + 统计 + 后台清理）
 #[derive(Clone)]
 pub struct LocalCache {
+    /// 缓存 key 前缀（通常为 app_name，用于多项目隔离）
+    key_prefix: String,
     /// 缓存数据存储（key → 条目）
     data: Arc<RwLock<HashMap<String, CacheEntry>>>,
     /// 最大容量（超过后 LRU 淘汰）
@@ -122,10 +124,12 @@ impl Clone for AtomicCacheStats {
 impl LocalCache {
     /// 创建本地内存缓存
     ///
+    /// - `key_prefix`: 缓存 key 前缀（通常为 app_name），为空时不加前缀
     /// - `max_capacity`: 超过此容量后按 LRU 策略淘汰
     /// - `default_ttl_secs`: 默认过期秒数（0 = 永不过期）
-    pub fn new(max_capacity: u64, default_ttl_secs: u64) -> Self {
+    pub fn new(key_prefix: &str, max_capacity: u64, default_ttl_secs: u64) -> Self {
         Self {
+            key_prefix: key_prefix.to_string(),
             data: Arc::new(RwLock::new(HashMap::new())),
             max_capacity,
             default_ttl_secs,
@@ -205,17 +209,30 @@ impl LocalCache {
             }
         });
     }
+
+    /// 生成带前缀的完整缓存 key
+    ///
+    /// 若 `key_prefix` 非空，返回 `"{prefix}:{key}"`，否则返回原始 key。
+    #[inline]
+    fn prefixed(&self, key: &str) -> String {
+        if self.key_prefix.is_empty() {
+            key.to_string()
+        } else {
+            format!("{}:{}", self.key_prefix, key)
+        }
+    }
 }
 
 #[async_trait]
 impl Cache for LocalCache {
     async fn get<T: DeserializeOwned + Send>(&self, key: &str) -> Result<Option<T>> {
+        let key = self.prefixed(key);
         let guard = self.data.read();
-        if let Some(entry) = guard.get(key) {
+        if let Some(entry) = guard.get(&key) {
             if let Some(expires) = entry.expires_at {
                 if Instant::now() > expires {
                     drop(guard);
-                    self.data.write().remove(key);
+                    self.data.write().remove(&key);
                     self.stats.misses.fetch_add(1, Ordering::Relaxed);
                     return Ok(None);
                 }
@@ -230,6 +247,7 @@ impl Cache for LocalCache {
     }
 
     async fn set<T: Serialize + Send + Sync>(&self, key: &str, value: &T) -> Result<()> {
+        let key = self.prefixed(key);
         let v = serde_json::to_value(value)
             .map_err(|e| alun_core::Error::Msg(e.to_string()))?;
         let mut guard = self.data.write();
@@ -243,15 +261,16 @@ impl Cache for LocalCache {
         } else {
             None
         };
-        guard.insert(key.to_string(), CacheEntry { value: v, expires_at });
+        guard.insert(key, CacheEntry { value: v, expires_at });
         Ok(())
     }
 
     async fn set_ex<T: Serialize + Send + Sync>(&self, key: &str, value: &T, ttl_secs: u64) -> Result<()> {
+        let key = self.prefixed(key);
         let v = serde_json::to_value(value)
             .map_err(|e| alun_core::Error::Msg(e.to_string()))?;
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
-        self.data.write().insert(key.to_string(), CacheEntry {
+        self.data.write().insert(key, CacheEntry {
             value: v,
             expires_at: Some(Instant::now() + Duration::from_secs(ttl_secs)),
         });
@@ -259,14 +278,16 @@ impl Cache for LocalCache {
     }
 
     async fn del(&self, key: &str) -> Result<()> {
-        let removed = self.data.write().remove(key).is_some();
+        let key = self.prefixed(key);
+        let removed = self.data.write().remove(&key).is_some();
         if removed { self.stats.deletes.fetch_add(1, Ordering::Relaxed); }
         Ok(())
     }
 
     async fn exists(&self, key: &str) -> Result<bool> {
+        let key = self.prefixed(key);
         let guard = self.data.read();
-        let found = guard.get(key).map_or(false, |entry| {
+        let found = guard.get(&key).map_or(false, |entry| {
             entry.expires_at.map_or(true, |exp| Instant::now() <= exp)
         });
         if found { self.stats.hits.fetch_add(1, Ordering::Relaxed); }
@@ -275,8 +296,9 @@ impl Cache for LocalCache {
     }
 
     async fn incr(&self, key: &str, delta: i64) -> Result<i64> {
+        let key = self.prefixed(key);
         let mut guard = self.data.write();
-        let entry = guard.entry(key.to_string()).or_insert_with(|| CacheEntry {
+        let entry = guard.entry(key).or_insert_with(|| CacheEntry {
             value: serde_json::Value::Number(serde_json::Number::from(0i64)),
             expires_at: None,
         });
@@ -287,17 +309,21 @@ impl Cache for LocalCache {
     }
 
     async fn keys(&self, pattern: &str) -> Result<Vec<String>> {
+        let prefixed_pattern = self.prefixed(pattern);
         let guard = self.data.read();
+        let prefix = &self.key_prefix;
+        let strip_len = if prefix.is_empty() { 0 } else { prefix.len() + 1 };
         Ok(guard.keys()
-            .filter(|k| match_pattern(k, pattern))
-            .cloned()
+            .filter(|k| match_pattern(k, &prefixed_pattern))
+            .map(|k| if strip_len > 0 && k.len() > strip_len { k[strip_len..].to_string() } else { k.clone() })
             .collect())
     }
 
     async fn delete_pattern(&self, pattern: &str) -> Result<u64> {
+        let prefixed_pattern = self.prefixed(pattern);
         let mut guard = self.data.write();
         let to_remove: Vec<String> = guard.keys()
-            .filter(|k| match_pattern(k, pattern))
+            .filter(|k| match_pattern(k, &prefixed_pattern))
             .cloned()
             .collect();
         let count = to_remove.len() as u64;
@@ -311,23 +337,41 @@ impl Cache for LocalCache {
 /// Redis 缓存实现
 #[derive(Clone)]
 pub struct RedisCache {
+    /// 缓存 key 前缀（通常为 app_name，用于多项目隔离）
+    key_prefix: String,
     /// Redis 连接管理器
     conn: ConnectionManager,
 }
 
 impl RedisCache {
     /// 创建 Redis 缓存（需传入已建立的连接管理器）
-    pub fn new(conn: ConnectionManager) -> Self {
-        Self { conn }
+    ///
+    /// - `key_prefix`: 缓存 key 前缀（通常为 app_name），为空时不加前缀
+    pub fn new(key_prefix: &str, conn: ConnectionManager) -> Self {
+        Self { key_prefix: key_prefix.to_string(), conn }
     }
 
     /// 从 URL 创建连接
-    pub async fn connect(url: &str) -> Result<Self> {
+    ///
+    /// - `key_prefix`: 缓存 key 前缀
+    pub async fn connect(key_prefix: &str, url: &str) -> Result<Self> {
         let client = redis::Client::open(url)
             .map_err(|e| alun_core::Error::Config(format!("Redis URL 无效: {}", e)))?;
         let conn = ConnectionManager::new(client).await
             .map_err(|e| alun_core::Error::Config(format!("Redis 连接失败: {}", e)))?;
-        Ok(Self { conn })
+        Ok(Self { key_prefix: key_prefix.to_string(), conn })
+    }
+
+    /// 生成带前缀的完整缓存 key
+    ///
+    /// 若 `key_prefix` 非空，返回 `"{prefix}:{key}"`，否则返回原始 key。
+    #[inline]
+    fn prefixed(&self, key: &str) -> String {
+        if self.key_prefix.is_empty() {
+            key.to_string()
+        } else {
+            format!("{}:{}", self.key_prefix, key)
+        }
     }
 
     fn map_err(e: redis::RedisError) -> alun_core::Error {
@@ -338,8 +382,9 @@ impl RedisCache {
 #[async_trait]
 impl Cache for RedisCache {
     async fn get<T: DeserializeOwned + Send>(&self, key: &str) -> Result<Option<T>> {
+        let key = self.prefixed(key);
         let result: Option<String> = redis::cmd("GET")
-            .arg(key)
+            .arg(&key)
             .query_async(&mut self.conn.clone())
             .await
             .map_err(Self::map_err)?;
@@ -354,36 +399,40 @@ impl Cache for RedisCache {
     }
 
     async fn set<T: Serialize + Send + Sync>(&self, key: &str, value: &T) -> Result<()> {
+        let key = self.prefixed(key);
         let json = serde_json::to_string(value)
             .map_err(|e| alun_core::Error::Msg(e.to_string()))?;
         redis::cmd("SET")
-            .arg(key).arg(&json)
+            .arg(&key).arg(&json)
             .query_async::<()>(&mut self.conn.clone())
             .await
             .map_err(Self::map_err)
     }
 
     async fn set_ex<T: Serialize + Send + Sync>(&self, key: &str, value: &T, ttl_secs: u64) -> Result<()> {
+        let key = self.prefixed(key);
         let json = serde_json::to_string(value)
             .map_err(|e| alun_core::Error::Msg(e.to_string()))?;
         redis::cmd("SETEX")
-            .arg(key).arg(ttl_secs).arg(&json)
+            .arg(&key).arg(ttl_secs).arg(&json)
             .query_async::<()>(&mut self.conn.clone())
             .await
             .map_err(Self::map_err)
     }
 
     async fn del(&self, key: &str) -> Result<()> {
+        let key = self.prefixed(key);
         redis::cmd("DEL")
-            .arg(key)
+            .arg(&key)
             .query_async::<()>(&mut self.conn.clone())
             .await
             .map_err(Self::map_err)
     }
 
     async fn exists(&self, key: &str) -> Result<bool> {
+        let key = self.prefixed(key);
         redis::cmd("EXISTS")
-            .arg(key)
+            .arg(&key)
             .query_async::<i32>(&mut self.conn.clone())
             .await
             .map_err(Self::map_err)
@@ -391,15 +440,16 @@ impl Cache for RedisCache {
     }
 
     async fn incr(&self, key: &str, delta: i64) -> Result<i64> {
+        let key = self.prefixed(key);
         let result: i64 = if delta == 1 {
             redis::cmd("INCR")
-                .arg(key)
+                .arg(&key)
                 .query_async(&mut self.conn.clone())
                 .await
                 .map_err(Self::map_err)?
         } else {
             redis::cmd("INCRBY")
-                .arg(key).arg(delta)
+                .arg(&key).arg(delta)
                 .query_async(&mut self.conn.clone())
                 .await
                 .map_err(Self::map_err)?
@@ -408,18 +458,28 @@ impl Cache for RedisCache {
     }
 
     async fn keys(&self, pattern: &str) -> Result<Vec<String>> {
+        let prefixed_pattern = self.prefixed(pattern);
+        let prefix = &self.key_prefix;
+        let strip_len = if prefix.is_empty() { 0 } else { prefix.len() + 1 };
         redis::cmd("KEYS")
-            .arg(pattern)
+            .arg(&prefixed_pattern)
             .query_async::<Vec<String>>(&mut self.conn.clone())
             .await
             .map_err(Self::map_err)
+            .map(|keys| {
+                keys.into_iter()
+                    .map(|k| if strip_len > 0 && k.len() > strip_len { k[strip_len..].to_string() } else { k })
+                    .collect()
+            })
     }
 
     async fn delete_pattern(&self, pattern: &str) -> Result<u64> {
         let keys: Vec<String> = self.keys(pattern).await?;
         if keys.is_empty() { return Ok(0); }
         let mut cmd = redis::cmd("DEL");
-        for k in &keys { cmd.arg(k); }
+        for k in &keys {
+            cmd.arg(self.prefixed(k));
+        }
         cmd.query_async::<u64>(&mut self.conn.clone())
             .await
             .map_err(Self::map_err)
@@ -512,15 +572,19 @@ impl Cache for SharedCache {
 // ──── 工厂函数 ──────────────────────────────────────
 
 /// 从配置创建共享缓存实例
-pub async fn create_cache(cache_config: &alun_config::CacheConfig, redis_config: &alun_config::RedisConfig) -> Result<SharedCache> {
+///
+/// `app_name` 将作为所有缓存 key 的前缀（`"{app_name}:{key}"`），
+/// 确保多项目共享同一 Redis 时 key 不冲突。
+/// 若 `app_name` 为空则不加前缀。
+pub async fn create_cache(app_name: &str, cache_config: &alun_config::CacheConfig, redis_config: &alun_config::RedisConfig) -> Result<SharedCache> {
     match cache_config.r#type.as_str() {
         "redis" => {
-            tracing::info!("使用 Redis 缓存 url={}", redis_config.url);
-            Ok(SharedCache::Redis(RedisCache::connect(&redis_config.url).await?))
+            tracing::info!("使用 Redis 缓存 url={} app={}", redis_config.url, app_name);
+            Ok(SharedCache::Redis(RedisCache::connect(app_name, &redis_config.url).await?))
         }
         _ => {
-            tracing::info!("使用本地缓存 capacity={}", cache_config.max_capacity);
-            Ok(SharedCache::Local(LocalCache::new(cache_config.max_capacity, cache_config.default_ttl)))
+            tracing::info!("使用本地缓存 capacity={} app={}", cache_config.max_capacity, app_name);
+            Ok(SharedCache::Local(LocalCache::new(app_name, cache_config.max_capacity, cache_config.default_ttl)))
         }
     }
 }
@@ -531,7 +595,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_cache_get_set() {
-        let c = LocalCache::new(100, 0);
+        let c = LocalCache::new("test",100, 0);
         c.set("key1", &"value1".to_string()).await.unwrap();
         let val: Option<String> = c.get("key1").await.unwrap();
         assert_eq!(val, Some("value1".to_string()));
@@ -542,7 +606,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_ex_expiration() {
-        let c = LocalCache::new(100, 0);
+        let c = LocalCache::new("test",100, 0);
         c.set_ex("temp", &"expire".to_string(), 1).await.unwrap();
         let val: Option<String> = c.get("temp").await.unwrap();
         assert_eq!(val, Some("expire".to_string()));
@@ -553,7 +617,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_incr() {
-        let c = LocalCache::new(100, 0);
+        let c = LocalCache::new("test",100, 0);
         assert_eq!(c.incr("counter", 1).await.unwrap(), 1);
         assert_eq!(c.incr("counter", 5).await.unwrap(), 6);
         assert_eq!(c.incr("counter", -2).await.unwrap(), 4);
@@ -561,7 +625,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_keys_pattern() {
-        let c = LocalCache::new(100, 0);
+        let c = LocalCache::new("test",100, 0);
         c.set("user:1", &"alice").await.unwrap();
         c.set("user:2", &"bob").await.unwrap();
         c.set("order:1", &"o1").await.unwrap();
@@ -573,7 +637,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_pattern() {
-        let c = LocalCache::new(100, 0);
+        let c = LocalCache::new("test",100, 0);
         c.set("session:a", &"s1").await.unwrap();
         c.set("session:b", &"s2").await.unwrap();
         c.set("user:1", &"alice").await.unwrap();

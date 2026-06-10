@@ -72,3 +72,24 @@ App::empty()
     .serve("8080")
     .await
 ```
+
+## Plugin Configuration
+
+Enable built-in plugins via the `[plugins]` section:
+
+```toml
+[plugins]
+enabled = ["cache", "notification", "async-task", "scheduler", "serial"]
+
+[plugins.serial]
+backend = "memory"     # memory | redis | custom
+
+[[plugins.serial.rules]]
+key = "order"
+format = "ORD{YYYY}{MM}{DD}{SEQ:8}"
+cycle = "daily"
+initial_value = 1
+step = "sequential"
+```
+
+Each plugin has its own sub-config section (e.g., `[plugins.scheduler]`, `[plugins.serial]`).

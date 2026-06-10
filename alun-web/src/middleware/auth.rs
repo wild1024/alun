@@ -73,7 +73,11 @@ where
 
     fn call(&mut self, mut req: Request<Body>) -> Self::Future {
         let path = req.uri().path().to_string();
-        let is_ignore_path = self.ignore_paths.contains(&path);
+        // 检查路径是否在忽略列表中：
+        // 1. 精确匹配
+        // 2. 前缀匹配（如 /api 匹配 /api/xxx，/api/files/dl 匹配 /api/files/dl/xxx）
+        let is_ignore_path = self.ignore_paths.contains(&path)
+            || self.ignore_paths.iter().any(|p| path.starts_with(&format!("{}/", p)));
 
         let token_opt: Option<&str> = req.headers()
             .get(axum::http::header::AUTHORIZATION)

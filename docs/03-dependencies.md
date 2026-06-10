@@ -40,7 +40,7 @@
 | **alun-core** | 无 | 最底层，无内部依赖 |
 | **alun-config** | `alun-core` | 配置加载需核心错误类型 |
 | **alun-log** | `alun-config` | 按 LogConfig 初始化 tracing |
-| **alun-utils** | `alun-core` | 工具函数使用核心错误类型 |
+| **alun-utils** | `alun-core`, `tokio`, `async-trait` | 工具函数使用核心错误类型，单号生成模块需异步运行时和 async trait |
 | **alun-cache** | `alun-core`, `alun-config` | 缓存工厂需配置，Trait 用核心错误 |
 | **alun-template** | `alun-core` | 模板错误 → 核心错误 |
 | **alun-web** | `alun-core`, `alun-config`, `alun-log`, `alun-db`, `alun-cache`, `alun-utils`（部分） | Web 层集成所有基础设施 |
@@ -122,7 +122,7 @@
 
 | Crate | 版本 | 用途 | 使用位置 |
 |-------|------|------|----------|
-| **tokio** | 1 (full) | 异步运行时 | 全项目 |
+| **tokio** | 1 (features = ["sync", "macros"] on alun-utils) | 异步运行时 | 全项目（含 `alun-utils::serial`） |
 
 ### 2.8 其他
 
@@ -130,7 +130,7 @@
 |-------|------|------|----------|
 | **anyhow** | 1 | 灵活错误处理 | 示例项目 |
 | **thiserror** | 2 | 派生 Error trait | `alun-db`(DbError) |
-| **async-trait** | 0.1 | async trait 支持 | `alun-core`(Plugin), `alun-cache`(Cache), `alun-db`(Hook) |
+| **async-trait** | 0.1 | async trait 支持 | `alun-core`(Plugin), `alun-cache`(Cache), `alun-db`(Hook), `alun-utils`(serial) |
 | **linkme** | 0.3 | 编译期分布式切片 | `alun-web`(ROUTES), `alun-macros` |
 | **inventory** | 0.3 | 编译期类型注册（备选） | — |
 | **parking_lot** | 0.12 | 高性能同步原语 | 全项目（RwLock, Mutex） |

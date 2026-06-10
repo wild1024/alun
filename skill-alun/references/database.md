@@ -66,6 +66,8 @@ row.get_as::<String>("name") // Option<String>
 row.get_as::<i64>("age")     // Option<i64>
 row.get_id()                 // Option<&Value>
 row.has("field")             // bool
+row.mark_all_changed()       // Mark all fields as changed
+row.clear_changes()          // Clear change tracking (subsequent set() will only contain new fields)
 row.detect_id_kind()         // Option<IdKind>
 ```
 

@@ -4,6 +4,7 @@ pub mod str;
 pub mod date;
 pub mod mask;
 pub mod sid;
+pub mod serial;
 pub mod valid;
 pub mod web;
 pub mod crypto;
@@ -28,3 +29,7 @@ pub use web::extract_client_ip;
 pub use crypto::Crypto;
 pub use export::{Export, Import, ExportFormat};
 pub use ua::{parse_user_agent, UaInfo};
+pub use serial::{
+    SerialGenerator, SerialRule, SerialRecord, SerialError,
+    MemorySerialBackend, FormatEngine, CyclePeriod, IncrementStrategy,
+};

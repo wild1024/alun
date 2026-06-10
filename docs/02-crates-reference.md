@@ -274,7 +274,7 @@ pub mod prelude {
 
 | 导出项                                                                                               | 来源         | 说明                                 |
 | ------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------- |
-| `validate_uuid`、`validate_mobile`、`validate_password_strength`、`validate_id_card`、`validate_date` | `alun-web` | 自定义 validator 校验函数                 |
+| `validate_uuid`、`validate_mobile`、`validate_password_strength`、`validate_id_card`、`validate_date`、`validate_datetime`、`validate_date_or_datetime` | `alun-web` | 自定义 validator 校验函数       |
 | `ValidateExt`                                                                                     | `alun-web` | 为 DTO 提供 `validate_or_reject()` 方法 |
 | `web`                                                                                             | `alun-web` | 别名为 `alun_web`                     |
 
@@ -441,13 +441,17 @@ JWT Token 声明结构。
 
 `alun-web` 内置了以下 validator 自定义校验函数，可直接用于 `#[validate(custom(function = "..."))]` 属性：
 
-| 函数                                  | 说明                       |
-| ----------------------------------- | ------------------------ |
-| `validate_uuid(value)`              | 验证 UUID 格式（v1\~v7 均支持）   |
-| `validate_mobile(value)`            | 验证手机号（中国大陆）              |
-| `validate_password_strength(value)` | 验证密码强度（≥8位，含大小写+数字+特殊字符） |
-| `validate_id_card(value)`           | 验证中国居民身份证号（含校验位）         |
-| `validate_date(value)`              | 验证日期格式（YYYY-MM-DD）       |
+| 函数                                       | 说明                                     |
+| ---------------------------------------- | -------------------------------------- |
+| `validate_uuid(value)`                   | 验证 UUID 格式（v1\~v7 均支持）                 |
+| `validate_mobile(value)`                 | 验证手机号（中国大陆）                            |
+| `validate_password_strength(value)`      | 验证密码强度（≥8位，含大小写+数字+特殊字符）               |
+| `validate_id_card(value)`                | 验证中国居民身份证号（含校验位）                       |
+| `validate_date(value)`                   | 验证日期格式（YYYY-MM-DD）                     |
+| `validate_datetime(value)`               | 验证日期时间格式（ISO 8601 / RFC 3339 或 YYYY-MM-DD） |
+| `validate_date_or_datetime(value)`       | 验证日期（YYYY-MM-DD）或日期时间（ISO 8601/RFC 3339） |
+| `validate_email(value)`                  | 验证邮箱格式                                  |
+| `validate_url(value)`                    | 验证 URL 格式                               |
 
 ### 中间件体系
 
@@ -779,6 +783,7 @@ async fn download_file(Path(name): Path<String>) -> Res<String> {
 | `.get_as::<T>(key)`                   | 反序列化获取字段值           |
 | `.get_id()`                           | 获取主键值               |
 | `.mark_all_changed()`                 | 标记所有字段为已修改          |
+| `.clear_changes()`                    | 清除变更追踪，使后续 set() 只包含新字段 |
 | `.has(key)`                           | 判断字段是否存在            |
 | `.to_json()` / `Row::from_json(json)` | JSON 序列化            |
 
@@ -1149,10 +1154,12 @@ ConfigManager::generate_default("config")?;     // 生成 config/config.toml
 
 - `HashMap<String, CacheEntry>` + `RwLock`（高并发读写）
 - 支持 TTL 过期 + 后台清理任务，统计命中率/淘汰/过期清理
+- `key_prefix` 参数用于多项目共享（如 App Name），自动为所有 key 添加 `"{prefix}:"` 前缀
 
 #### `RedisCache` — Redis 缓存
 
 基于 `redis::aio::ConnectionManager` 的远程缓存实现。
+- `key_prefix` 参数用于多项目共享同一 Redis 实例时隔离 key 命名空间
 
 #### `SharedCache` — 共享缓存枚举
 
@@ -1172,7 +1179,10 @@ ConfigManager::generate_default("config")?;     // 生成 config/config.toml
 ### 工厂函数
 
 ```rust
+/// `app_name` 将作为所有缓存 key 的前缀（`"{app_name}:{key}"`），
+/// 确保多项目共享同一 Redis 时 key 不冲突。若为空则不加前缀。
 pub async fn create_cache(
+    app_name: &str,
     cache_config: &CacheConfig,
     redis_config: &RedisConfig,
 ) -> Result<SharedCache>
@@ -1184,7 +1194,7 @@ pub async fn create_cache(
 use alun_cache::{create_cache, Cache, SharedCache};
 
 // ── 创建缓存 ──
-let cache: SharedCache = create_cache(&config.cache, &config.redis).await?;
+let cache: SharedCache = create_cache("my-app", &config.cache, &config.redis).await?;
 
 // ── Handler 中通过全局函数获取缓存 ──
 async fn handler() -> Res<String> {
@@ -1225,7 +1235,7 @@ tracing::info!("缓存命中率: {:.2}%", stats.hit_rate() * 100.0);
 
 // ── LocalCache 直接使用 ──
 use alun_cache::LocalCache;
-let local = LocalCache::new(10000, 3600);                   // 容量10000, 默认TTL 3600s
+let local = LocalCache::new("my-app", 10000, 3600);          // app前缀, 容量10000, 默认TTL 3600s
 local.set("key", "value").await?;
 ```
 
@@ -1381,8 +1391,8 @@ let masked = mask_json_value(input, &["password", "mobile"]);
 | `short()` | 16 位 hex      |
 | `tiny()`  | 8 位 hex       |
 | `tsid()`  | 时间戳 + 随机数     |
-| `uuid()`  | UUID v4       |
-| `uuid7()` | UUID v7（时间有序） |
+| `uuid()`  | UUID v4（36 字符标准格式） |
+| `uuid7()` | UUID v7（36 字符标准格式，时间有序） |
 
 #### `ua` — User-Agent 解析
 
@@ -1424,7 +1434,8 @@ assert_eq!(info.os_type, "Windows");
 | `is_uuid(s)`                   | UUID（v1\~v7 均支持）            |
 | `is_id_card(s)`                | 中国居民身份证号（含校验位）              |
 | `is_date(s)`                   | 日期格式（YYYY-MM-DD）            |
-| `is_datetime(s)`               | 日期时间（ISO 8601 / RFC 3339）   |
+| `is_datetime(s)` | 日期时间（ISO 8601 / RFC 3339 或 YYYY-MM-DD） |
+| `is_file_extension(name, ext)` | 验证文件扩展名是否在允许列表中             |
 | `is_json(s)`                   | 合法 JSON 字符串                 |
 | `is_base64(s)`                 | Base64 编码                   |
 | `is_digits(s)`                 | 纯数字                         |

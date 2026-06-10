@@ -14,7 +14,7 @@ pub use response::{Res, ResResult, ApiError, PageData};
 pub use middleware::{UserId, AuthClaims, AuthLayer, RequireRoleLayer, RequirePermissionLayer, TokenClaims, TokenType};
 pub use jwt::JWT;
 pub use extract::ValidatedJson;
-pub use extract::{validate_uuid, validate_mobile, validate_password_strength, validate_id_card, validate_date, validate_email, validate_url, validate_datetime};
+pub use extract::{validate_uuid, validate_mobile, validate_password_strength, validate_id_card, validate_date, validate_email, validate_url, validate_datetime, validate_date_or_datetime};
 pub use extract::ValidateExt;
 
 #[cfg(feature = "db")]

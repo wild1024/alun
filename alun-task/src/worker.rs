@@ -39,22 +39,34 @@ pub struct TaskWorker {
 }
 
 impl TaskWorker {
-    /// 创建任务执行器
+    /// 创建任务执行器并订阅指定的 topics
+    ///
+    /// 注意：consumer 创建和 subscribe 必须在同一线程中完成，
+    /// 因此此方法在 spawn_blocking 中调用。
     pub fn new(
         config: TaskWorkerConfig,
         storage: Arc<dyn TaskStorage>,
         registry: HandlerRegistry,
         metrics: Arc<TaskMetrics>,
+        topics: &[String],
     ) -> Result<Self, String> {
         let consumer: StreamConsumer = ClientConfig::new()
             .set("bootstrap.servers", &config.brokers)
             .set("group.id", &config.group_id)
             .set("enable.auto.commit", "false")
             .set("auto.offset.reset", "earliest")
-            .set("session.timeout.ms", "30000")
-            .set("max.poll.interval.ms", "600000")
+            .set("allow.auto.create.topics", "true")
             .create()
             .map_err(|e| format!("Kafka Consumer 创建失败: {}", e))?;
+
+        // 在同一线程中订阅 topics（rdkafka 要求 subscribe 与 consumer 创建在同一线程）
+        // 去重：同一 topic 注册多个 handler 时避免重复订阅
+        let mut unique_topics: Vec<&str> = topics.iter().map(|s| s.as_str()).collect();
+        unique_topics.sort_unstable();
+        unique_topics.dedup();
+        consumer
+            .subscribe(&unique_topics)
+            .map_err(|e| format!("Kafka Consumer 订阅失败: {}", e))?;
 
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", &config.brokers)
@@ -73,13 +85,9 @@ impl TaskWorker {
         })
     }
 
-    /// 订阅 topic 并启动消费循环
-    pub async fn run(&self, topics: &[String]) -> Result<(), String> {
-        self.consumer
-            .subscribe(&topics.iter().map(|s| s.as_str()).collect::<Vec<_>>())
-            .map_err(|e| format!("Kafka Consumer 订阅失败: {}", e))?;
-
-        info!("TaskWorker 启动，订阅 topics: {:?}", topics);
+    /// 启动消费循环（subscribe 已在 new 中完成）
+    pub async fn run(&self) -> Result<(), String> {
+        info!("TaskWorker 启动，开始消费消息");
 
         while self.running.load(std::sync::atomic::Ordering::Relaxed) {
             match self.consumer.recv().await {
@@ -137,7 +145,9 @@ impl TaskWorker {
             }
         };
 
-        let _ = self.storage.update_task_status(&task_msg.task_id, TaskStatus::Processing).await;
+        if let Err(e) = self.storage.update_task_status(&task_msg.task_id, TaskStatus::Processing).await {
+            error!(task_id = %task_msg.task_id, error = %e, "update_task_status(Processing) 失败");
+        }
 
         let started_at = Instant::now();
 
@@ -194,9 +204,15 @@ impl TaskWorker {
 
     /// 处理任务执行成功：更新状态为 Completed、存储结果、记录执行日志
     async fn handle_success(&self, msg: &TaskMessage, output: &serde_json::Value, elapsed_ms: i64) {
-        let _ = self.storage.update_task_status(&msg.task_id, TaskStatus::Completed).await;
-        let _ = self.storage.save_task_result(&msg.task_id, output).await;
-        let _ = self.storage.log_execution(&msg.task_id, TaskStatus::Completed, None, elapsed_ms).await;
+        if let Err(e) = self.storage.update_task_status(&msg.task_id, TaskStatus::Completed).await {
+            error!(task_id = %msg.task_id, error = %e, "update_task_status(Completed) 失败");
+        }
+        if let Err(e) = self.storage.save_task_result(&msg.task_id, output).await {
+            error!(task_id = %msg.task_id, error = %e, "save_task_result 失败");
+        }
+        if let Err(e) = self.storage.log_execution(&msg.task_id, TaskStatus::Completed, None, elapsed_ms).await {
+            error!(task_id = %msg.task_id, error = %e, "log_execution 失败");
+        }
         self.metrics.completed.inc();
         info!(task_id = %msg.task_id, elapsed_ms = elapsed_ms, "任务执行成功");
     }
@@ -217,20 +233,34 @@ impl TaskWorker {
         if attempt as u32 > config.max_retries {
             if let Some(ref dlq_topic) = config.dead_letter_topic {
                 warn!(task_id = %msg.task_id, attempt = attempt, "转入死信队列");
-                let _ = self.send_to_dlq(msg, dlq_topic, err_msg).await;
-                let _ = self.storage.update_task_status(&msg.task_id, TaskStatus::DeadLetter).await;
+                if let Err(e) = self.send_to_dlq(msg, dlq_topic, err_msg).await {
+                    error!(task_id = %msg.task_id, error = %e, "send_to_dlq 失败");
+                }
+                if let Err(e) = self.storage.update_task_status(&msg.task_id, TaskStatus::DeadLetter).await {
+                    error!(task_id = %msg.task_id, error = %e, "update_task_status(DeadLetter) 失败");
+                }
             } else {
                 warn!(task_id = %msg.task_id, attempt = attempt, "超过最大重试次数");
-                let _ = self.storage.update_task_status(&msg.task_id, TaskStatus::Failed).await;
-                let _ = self.storage.save_task_result(
+                if let Err(e) = self.storage.update_task_status(&msg.task_id, TaskStatus::Failed).await {
+                    error!(task_id = %msg.task_id, error = %e, "update_task_status(Failed) 失败");
+                }
+                if let Err(e) = self.storage.save_task_result(
                     &msg.task_id,
                     &serde_json::json!({"error": err_msg, "retries": attempt}),
-                ).await;
+                ).await {
+                    error!(task_id = %msg.task_id, error = %e, "save_task_result 失败");
+                }
             }
-            let _ = self.storage.log_execution(&msg.task_id, TaskStatus::Failed, Some(err_msg), elapsed_ms).await;
+            if let Err(e) = self.storage.log_execution(&msg.task_id, TaskStatus::Failed, Some(err_msg), elapsed_ms).await {
+                error!(task_id = %msg.task_id, error = %e, "log_execution 失败");
+            }
         } else {
-            let _ = self.storage.update_retry(&msg.task_id, attempt).await;
-            let _ = self.storage.log_execution(&msg.task_id, TaskStatus::Failed, Some(err_msg), elapsed_ms).await;
+            if let Err(e) = self.storage.update_retry(&msg.task_id, attempt).await {
+                error!(task_id = %msg.task_id, error = %e, "update_retry 失败");
+            }
+            if let Err(e) = self.storage.log_execution(&msg.task_id, TaskStatus::Failed, Some(err_msg), elapsed_ms).await {
+                error!(task_id = %msg.task_id, error = %e, "log_execution 失败");
+            }
             info!(task_id = %msg.task_id, attempt = attempt, "任务失败，等待重试: {}", err_msg);
         }
     }

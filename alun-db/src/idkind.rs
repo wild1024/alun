@@ -18,7 +18,7 @@ pub enum IdKind {
 impl IdKind {
     /// 从 JSON Value 自动检测 ID 类型
     ///
-    /// 检测优先级：Number(i64) → F64 → Bool → UUID 字符串 → 普通字符串
+    /// 检测优先级：Number(i64) → F64 → Bool → UUID 字符串 → 数字字符串 → 普通字符串
     pub fn detect(value: &Value) -> Self {
         match value {
             Value::Number(n) => {
@@ -33,6 +33,10 @@ impl IdKind {
             Value::String(s) => {
                 if is_uuid_format(s) {
                     IdKind::Uuid
+                } else if s.parse::<i64>().is_ok() {
+                    IdKind::I64
+                } else if s.parse::<f64>().is_ok() {
+                    IdKind::F64
                 } else {
                     IdKind::String
                 }
@@ -82,14 +86,24 @@ impl std::fmt::Display for IdKind {
     }
 }
 
-fn is_uuid_format(s: &str) -> bool {
-    if s.len() != 36 { return false; }
-    let bytes = s.as_bytes();
-    for (i, &b) in bytes.iter().enumerate() {
-        match i {
-            8 | 13 | 18 | 23 => { if b != b'-' { return false; } }
-            _ => { if !b.is_ascii_hexdigit() { return false; } }
+/// 检测字符串是否符合 UUID 格式
+///
+/// 支持两种格式：
+/// - 标准格式：36 字符，含 4 个连字符（如 `550e8400-e29b-41d4-a716-446655440000`）
+/// - 简单格式：32 字符，无连字符的纯 hex（如 `550e8400e29b41d4a716446655440000`）
+pub(crate) fn is_uuid_format(s: &str) -> bool {
+    match s.len() {
+        36 => {
+            let bytes = s.as_bytes();
+            for (i, &b) in bytes.iter().enumerate() {
+                match i {
+                    8 | 13 | 18 | 23 => { if b != b'-' { return false; } }
+                    _ => { if !b.is_ascii_hexdigit() { return false; } }
+                }
+            }
+            true
         }
+        32 => s.as_bytes().iter().all(|&b| b.is_ascii_hexdigit()),
+        _ => false,
     }
-    true
 }
