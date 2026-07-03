@@ -59,7 +59,8 @@ where
 
 /// ValidatedJson 的校验便捷方法 —— 对实现了 `validator::Validate` 的类型调用 `validate()`
 impl<T: validator::Validate> ValidatedJson<T> {
-    /// 执行字段级校验
+    /// 执行字段级校验，自动在 `FromRequest` 提取时被调用。
+    /// 若类型实现了 `Validate`，则提取器会自动校验；若未实现，则跳过校验。
     ///
     /// 校验失败返回 `ApiError::unprocessable_entity`，包含格式化的校验错误列表。
     pub fn validate(self) -> Result<Self, ApiError> {

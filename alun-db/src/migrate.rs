@@ -153,7 +153,7 @@ impl Migrator {
         Ok(rows.iter().filter_map(|r| r.get_as::<String>("version")).collect())
     }
 
-    /// 读取并执行单个 `.up.sql` 迁移文件，完成后记录到 `_migrations` 表
+    /// 读取并执行单个 `.up.sql` 迁移文件，按分号拆分逐条执行，完成后记录到 `_migrations` 表
     async fn execute_migration(&self, file: &Path, version: &str) -> DbResult<MigrationRecord> {
         let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
         info!("执行迁移: {}", name);
@@ -161,7 +161,13 @@ impl Migrator {
         let sql = tokio::fs::read_to_string(file).await
             .map_err(|e| DbError::Other(format!("读取迁移文件失败: {}", e)))?;
 
-        self.db.execute(&sql, &[]).await?;
+        // 按分号拆分，逐条执行（因 PostgreSQL prepared statement 不支持多条命令）
+        for stmt in split_sql(&sql) {
+            if stmt.is_empty() {
+                continue;
+            }
+            self.db.execute(&stmt, &[]).await?;
+        }
 
         self.db.execute(
             "INSERT INTO _migrations (version, name, success) VALUES ($1, $2, TRUE)", &[version, &name],
@@ -209,6 +215,80 @@ fn extract_version(path: &Path) -> String {
             }
         })
         .unwrap_or_default()
+}
+
+/// 按分号拆分 SQL 语句，跳过空语句和纯注释行
+fn split_sql(sql: &str) -> Vec<String> {
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    let mut in_single_quote = false;
+    // PostgreSQL 支持 $$ 和 $tag$ 引用
+    let mut dollar_quote_end: Option<String> = None;
+
+    for ch in sql.chars() {
+        if let Some(ref end_tag) = dollar_quote_end {
+            current.push(ch);
+            if current.ends_with(end_tag) {
+                dollar_quote_end = None;
+            }
+            continue;
+        }
+
+        if ch == '\'' && !in_single_quote {
+            in_single_quote = true;
+            current.push(ch);
+            continue;
+        }
+        if ch == '\'' && in_single_quote {
+            in_single_quote = false;
+            current.push(ch);
+            continue;
+        }
+
+        if in_single_quote {
+            current.push(ch);
+            continue;
+        }
+
+        if ch == '$' {
+            current.push(ch);
+            // 检查是否是 $$ 或 $tag$ 开头
+            let rest = current.trim_end();
+            if let Some(dollar_start) = rest.rfind('$') {
+                let tag = &rest[dollar_start..];
+                if tag.starts_with("$") && tag.ends_with("$") {
+                    dollar_quote_end = Some(tag.to_string());
+                }
+            }
+            continue;
+        }
+
+        if ch == ';' {
+            let trimmed = current.trim().to_string();
+            if !trimmed.is_empty() && !is_comment_only(&trimmed) {
+                statements.push(trimmed);
+            }
+            current.clear();
+        } else {
+            current.push(ch);
+        }
+    }
+
+    // 处理最后一条语句（可能没有分号结尾）
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() && !is_comment_only(&trimmed) {
+        statements.push(trimmed);
+    }
+
+    statements
+}
+
+/// 判断字符串是否仅为注释（以 -- 开头）
+fn is_comment_only(s: &str) -> bool {
+    s.lines().all(|line| {
+        let trimmed = line.trim();
+        trimmed.is_empty() || trimmed.starts_with("--")
+    })
 }
 
 #[cfg(test)]

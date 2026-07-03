@@ -13,6 +13,8 @@ pub enum IdKind {
     F64,
     String,
     Bool,
+    /// JSON 类型（jsonb），用于数组/对象字段
+    Json,
 }
 
 impl IdKind {
@@ -33,6 +35,8 @@ impl IdKind {
             Value::String(s) => {
                 if is_uuid_format(s) {
                     IdKind::Uuid
+                } else if is_json_string(s) {
+                    IdKind::Json
                 } else if s.parse::<i64>().is_ok() {
                     IdKind::I64
                 } else if s.parse::<f64>().is_ok() {
@@ -41,6 +45,7 @@ impl IdKind {
                     IdKind::String
                 }
             }
+            Value::Array(_) | Value::Object(_) => IdKind::Json,
             Value::Bool(_) => IdKind::Bool,
             _ => IdKind::String,
         }
@@ -52,12 +57,15 @@ impl IdKind {
     pub fn is_i64(&self) -> bool { matches!(self, IdKind::I64) }
     /// 是否为字符串类型
     pub fn is_string(&self) -> bool { matches!(self, IdKind::String) }
+    /// 是否为 JSON 类型
+    pub fn is_json(&self) -> bool { matches!(self, IdKind::Json) }
 
     /// 主键 WHERE 子句中的 SQL 类型转换后缀
     pub fn id_cast_sql(&self) -> &'static str {
         match self {
             IdKind::Uuid => "::uuid",
             IdKind::I64 => "::bigint",
+            IdKind::Json => "::jsonb",
             _ => "",
         }
     }
@@ -69,6 +77,7 @@ impl IdKind {
             IdKind::I64 => "::bigint",
             IdKind::F64 => "::double precision",
             IdKind::Bool => "::boolean",
+            IdKind::Json => "::jsonb",
             _ => "",
         }
     }
@@ -82,6 +91,7 @@ impl std::fmt::Display for IdKind {
             IdKind::F64    => write!(f, "f64"),
             IdKind::String => write!(f, "string"),
             IdKind::Bool   => write!(f, "bool"),
+            IdKind::Json   => write!(f, "json"),
         }
     }
 }
@@ -106,4 +116,15 @@ pub(crate) fn is_uuid_format(s: &str) -> bool {
         32 => s.as_bytes().iter().all(|&b| b.is_ascii_hexdigit()),
         _ => false,
     }
+}
+
+/// 检测字符串是否可能是 JSON 数组或对象
+///
+/// 简单启发式：以 `[` 或 `{` 开头，且能被 serde_json 解析为合法 JSON。
+fn is_json_string(s: &str) -> bool {
+    let trimmed = s.trim();
+    if !trimmed.starts_with('[') && !trimmed.starts_with('{') {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(trimmed).is_ok()
 }

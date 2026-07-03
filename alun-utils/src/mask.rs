@@ -45,7 +45,8 @@ fn mask_scalar_if_needed(val: Value) -> Value {
         Value::String(s) => {
             let s = s.trim();
             if s.is_empty() { return val; }
-            if s.len() >= 11 && (MOBILE_RE.is_match(s) || s.len() == 11 && s.starts_with('1')) {
+            // 手机号：正则已校验 11 位纯数字 1[3-9]\d{9}，不再依赖 starts_with('1') 避免误匹配多字节字符
+            if MOBILE_RE.is_match(s) {
                 return Value::String(mask_mobile(s));
             }
             if s.len() >= 15 && s.len() <= 20 && contains_alpha_numeric(s) {
@@ -67,13 +68,20 @@ fn contains_alpha_numeric(s: &str) -> bool {
 }
 
 fn mask_mobile(s: &str) -> String {
-    if s.len() < 7 { return s.to_string(); }
-    format!("{}****{}", &s[..3], &s[s.len()-4..])
+    // 使用字符切片避免在多字节字符上越界（防御性编程）
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() < 7 { return s.to_string(); }
+    let prefix: String = chars[..3].iter().collect();
+    let suffix: String = chars[chars.len() - 4..].iter().collect();
+    format!("{}****{}", prefix, suffix)
 }
 
 fn mask_id_card(s: &str) -> String {
-    if s.len() < 8 { return s.to_string(); }
-    format!("{}****{}", &s[..4], &s[s.len()-4..])
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() < 8 { return s.to_string(); }
+    let prefix: String = chars[..4].iter().collect();
+    let suffix: String = chars[chars.len() - 4..].iter().collect();
+    format!("{}****{}", prefix, suffix)
 }
 
 fn mask_email(s: &str) -> String {

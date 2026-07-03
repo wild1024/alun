@@ -48,7 +48,7 @@ macro_rules! impl_db_ops {
             fn [<typed_row_to_row_ $db_mod:snake>](
                 row: &<sqlx::$db_mod as sqlx::Database>::Row
             ) -> Row {
-                use chrono::{DateTime, Utc};
+                use chrono::{DateTime, Utc, NaiveDate};
 
                 let mut r = Row::default();
                 for col in row.columns() {
@@ -66,6 +66,8 @@ macro_rules! impl_db_ops {
                         r.data.insert(name, Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<DateTime<Utc>, usize>(idx) {
                         r.data.insert(name, Value::String(v.to_rfc3339()));
+                    } else if let Ok(v) = row.try_get::<NaiveDate, usize>(idx) {
+                        r.data.insert(name, Value::String(v.format("%Y-%m-%d").to_string()));
                     } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
                         if let Some(n) = Number::from_f64(v) {
                             r.data.insert(name, Value::Number(n));
@@ -128,7 +130,7 @@ macro_rules! impl_db_ops_no_bigdecimal {
             fn [<typed_row_to_row_ $db_mod:snake>](
                 row: &<sqlx::$db_mod as sqlx::Database>::Row
             ) -> Row {
-                use chrono::{DateTime, Utc};
+                use chrono::{DateTime, Utc, NaiveDate};
 
                 let mut r = Row::default();
                 for col in row.columns() {
@@ -146,6 +148,8 @@ macro_rules! impl_db_ops_no_bigdecimal {
                         r.data.insert(name, Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<DateTime<Utc>, usize>(idx) {
                         r.data.insert(name, Value::String(v.to_rfc3339()));
+                    } else if let Ok(v) = row.try_get::<NaiveDate, usize>(idx) {
+                        r.data.insert(name, Value::String(v.format("%Y-%m-%d").to_string()));
                     } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
                         if let Some(n) = Number::from_f64(v) {
                             r.data.insert(name, Value::Number(n));
@@ -224,6 +228,16 @@ fn typed_row_to_row_any(row: &sqlx::any::AnyRow) -> Row {
         } else if let Ok(v) = row.try_get::<i32, usize>(idx) {
             r.data.insert(name, Value::Number((v as i64).into()));
         } else if let Ok(v) = row.try_get::<String, usize>(idx) {
+            // 检测 JSONB 列：若字符串是 JSON 数组或对象，则解析为 Value
+            let trimmed = v.trim();
+            if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+            {
+                if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+                    r.data.insert(name, parsed);
+                    continue;
+                }
+            }
             r.data.insert(name, Value::String(v));
         } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
             if let Some(n) = Number::from_f64(v) {
@@ -556,7 +570,7 @@ fn adjust_param_indices_with_casts(sql: &str, offset: usize, params: &[&str]) ->
                 let s: &str = v;
                 if s.len() == 36 && s.chars().filter(|&c| c == '-').count() == 4 { "::uuid" }
                 else if s.parse::<i64>().is_ok() { "::bigint" }
-                else if s.parse::<f64>().is_ok() { "::double precision" }
+                else if s.parse::<f64>().is_ok() { "::numeric" }
                 else { "" }
             }).unwrap_or("");
             format!("${}{}", n, cast)
@@ -568,7 +582,7 @@ fn adjust_param_indices_with_casts(sql: &str, offset: usize, params: &[&str]) ->
             let s: &str = v;
             if s.len() == 36 && s.chars().filter(|&c| c == '-').count() == 4 { "::uuid" }
             else if s.parse::<i64>().is_ok() { "::bigint" }
-            else if s.parse::<f64>().is_ok() { "::double precision" }
+            else if s.parse::<f64>().is_ok() { "::numeric" }
             else { "" }
         }).unwrap_or("");
         format!("${}{}", n + offset, cast)
@@ -583,18 +597,23 @@ fn id_cast(value: &Value) -> &'static str {
     }
 }
 
-fn value_cast(value: &Value) -> &'static str {
+pub(crate) fn value_cast(value: &Value) -> &'static str {
     match value {
         Value::Object(_) | Value::Array(_) => "::jsonb",
         Value::String(s) => {
             if is_inet_format(s) {
                 "::inet"
+            } else if is_date_format(s) {
+                "::date"
+            } else if is_timestamptz_format(s) {
+                "::timestamptz"
             } else {
                 match IdKind::detect(value) {
                     IdKind::Uuid => "::uuid",
                     IdKind::I64 => "::bigint",
-                    IdKind::F64 => "::double precision",
+                    IdKind::F64 => "::numeric",
                     IdKind::Bool => "::boolean",
+                    IdKind::Json => "::jsonb",
                     _ => "",
                 }
             }
@@ -602,11 +621,34 @@ fn value_cast(value: &Value) -> &'static str {
         _ => match IdKind::detect(value) {
             IdKind::Uuid => "::uuid",
             IdKind::I64 => "::bigint",
-            IdKind::F64 => "::double precision",
+            IdKind::F64 => "::numeric",
             IdKind::Bool => "::boolean",
+            IdKind::Json => "::jsonb",
             _ => "",
         },
     }
+}
+
+/// 检测日期格式（YYYY-MM-DD）
+fn is_date_format(s: &str) -> bool {
+    if s.len() != 10 { return false; }
+    let bytes = s.as_bytes();
+    bytes[4] == b'-' && bytes[7] == b'-'
+        && bytes[..4].iter().all(|b| b.is_ascii_digit())
+        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
+        && bytes[8..].iter().all(|b| b.is_ascii_digit())
+}
+
+/// 检测时间戳格式（YYYY-MM-DDTHH:MM:SS 或含时区后缀）
+fn is_timestamptz_format(s: &str) -> bool {
+    if s.len() < 19 { return false; }
+    let bytes = s.as_bytes();
+    bytes[4] == b'-' && bytes[7] == b'-'
+        && (bytes[10] == b'T' || bytes[10] == b' ')
+        && bytes[13] == b':' && bytes[16] == b':'
+        && bytes[..4].iter().all(|b| b.is_ascii_digit())
+        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
+        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
 }
 
 fn is_inet_format(s: &str) -> bool {

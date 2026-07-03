@@ -42,7 +42,7 @@ pub struct ActiveTx {
     rolled_back: bool,
 }
 
-enum ActiveTxInner {
+pub(crate) enum ActiveTxInner {
     /// PostgreSQL 连接
     Postgres(sqlx::pool::PoolConnection<sqlx::Postgres>),
     /// MySQL 连接
@@ -52,6 +52,11 @@ enum ActiveTxInner {
 }
 
 impl ActiveTx {
+    /// 创建活跃事务句柄（内部使用，由 `Db::tx` 调用）
+    pub(crate) fn new(inner: ActiveTxInner) -> Self {
+        Self { inner, committed: false, rolled_back: false }
+    }
+
     /// 在事务中执行写操作（INSERT/UPDATE/DELETE），返回受影响行数
     ///
     /// 参数使用 `$1`、`$2` 占位符，按顺序绑定。
@@ -99,12 +104,85 @@ impl ActiveTx {
         }
     }
 
+    /// 在事务中执行查询，返回多行记录
+    ///
+    /// 参数使用 `$1`、`$2` 占位符，按顺序绑定。
+    pub async fn query(&mut self, sql: &str, params: &[&str]) -> DbResult<Vec<crate::Row>> {
+        match &mut self.inner {
+            ActiveTxInner::Postgres(c) => {
+                let mut q = sqlx::query::<sqlx::Postgres>(sql);
+                for p in params { q = q.bind(*p); }
+                let rows = q.fetch_all(&mut **c).await?;
+                Ok(rows.iter().map(tx_row_to_row_pg).collect())
+            }
+            ActiveTxInner::Mysql(c) => {
+                let mut q = sqlx::query::<sqlx::MySql>(sql);
+                for p in params { q = q.bind(*p); }
+                let rows = q.fetch_all(&mut **c).await?;
+                Ok(rows.iter().map(tx_row_to_row_my).collect())
+            }
+            ActiveTxInner::Sqlite(c) => {
+                let mut q = sqlx::query::<sqlx::Sqlite>(sql);
+                for p in params { q = q.bind(*p); }
+                let rows = q.fetch_all(&mut **c).await?;
+                Ok(rows.iter().map(tx_row_to_row_sqlite).collect())
+            }
+        }
+    }
+
+    /// 在事务中插入单条记录（Row 需设置 `table` 和字段值）
+    ///
+    /// PostgreSQL 使用 `RETURNING *` 直接返回插入后的完整行；
+    /// MySQL/SQLite 插入后通过主键回查。
+    ///
+    /// # 错误
+    ///
+    /// - Row 缺少表名 → `Argument` 错误
+    /// - 没有变更字段 → `Argument` 错误
+    pub async fn insert(&mut self, row: &crate::Row) -> DbResult<crate::Row> {
+        use crate::db::{value_cast, value_to_string};
+
+        let table = row.table.as_deref().ok_or(DbError::Argument("Row 缺少表名".into()))?;
+        let columns: Vec<&String> = row.changes.iter().collect();
+        if columns.is_empty() { return Err(DbError::Argument("没有变更的字段".into())); }
+
+        let placeholders: Vec<String> = columns.iter().enumerate().map(|(i, c)| {
+            let cast = row.data.get(*c).map(|v| value_cast(v)).unwrap_or("");
+            format!("${}{}", i + 1, cast)
+        }).collect();
+        let col_str = columns.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", ");
+        let values: Vec<String> = columns.iter()
+            .filter_map(|c| row.data.get(*c)).map(value_to_string).collect();
+        let val_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+
+        match &mut self.inner {
+            ActiveTxInner::Postgres(_) => {
+                let sql = format!("INSERT INTO {} ({}) VALUES ({}) RETURNING *", table, col_str, placeholders.join(", "));
+                self.query_one(&sql, &val_refs).await?.ok_or_else(|| DbError::Other("INSERT 返回空".into()))
+            }
+            ActiveTxInner::Mysql(_) | ActiveTxInner::Sqlite(_) => {
+                let sql = format!("INSERT INTO {} ({}) VALUES ({})", table, col_str, placeholders.join(", "));
+                self.execute(&sql, &val_refs).await?;
+                let pk_val = row.data.get("id");
+                match pk_val {
+                    Some(v) => {
+                        let pk_str = value_to_string(v);
+                        let find_sql = format!("SELECT * FROM {} WHERE id = $1", table);
+                        self.query_one(&find_sql, &[pk_str.as_str()]).await?
+                            .ok_or(DbError::Other("INSERT 后查不到".into()))
+                    }
+                    None => Err(DbError::Argument("非 PG 数据库需 Row 含主键".into())),
+                }
+            }
+        }
+    }
+
     /// 标记事务需回滚（即使闭包返回 `Ok`，也会执行 ROLLBACK）
     ///
     /// 用于业务逻辑判断失败但不想中断闭包流程的场景。
     pub fn set_rollback_only(&mut self) { self.committed = false; self.rolled_back = true; }
 
-    async fn commit(mut self) -> DbResult<()> {
+    pub(crate) async fn commit(mut self) -> DbResult<()> {
         if self.rolled_back { self.rollback().await; return Ok(()); }
         debug!("事务提交");
         match &mut self.inner {
@@ -116,7 +194,7 @@ impl ActiveTx {
         Ok(())
     }
 
-    async fn rollback(&mut self) {
+    pub(crate) async fn rollback(&mut self) {
         debug!("事务回滚");
         match &mut self.inner {
             ActiveTxInner::Postgres(c) => { let _ = sqlx::query::<sqlx::Postgres>("ROLLBACK").execute(&mut **c).await; }
