@@ -1,7 +1,7 @@
 [package]
 name = "alun-fs"
 description = "Alun file system abstraction: local file storage and multi-backend support (MinIO/S3)"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
