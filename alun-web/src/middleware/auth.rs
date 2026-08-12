@@ -12,7 +12,7 @@ use std::task::{Context, Poll};
 use std::collections::HashSet;
 use tower::{Layer, Service};
 use crate::response::{Res, codes};
-use super::{UserId, AuthClaims, TokenClaims};
+use super::{UserId, AuthClaims, TokenClaims, TokenType};
 
 /// JWT 认证中间件
 ///
@@ -72,6 +72,16 @@ where
     }
 
     fn call(&mut self, mut req: Request<Body>) -> Self::Future {
+        // CORS 预检请求（OPTIONS）不携带凭据，跳过认证直接放行。
+        // 浏览器发送跨域请求（带 Authorization 头）前会先发 OPTIONS 预检，
+        // 若被认证中间件拦截返回 401，会导致浏览器阻止实际请求（ERR_FAILED）。
+        // /auth/login 等公开路由的 OPTIONS 碰巧通过（在 ignore_paths 中），
+        // 但 /auth/me、/auth/menus 等受保护路由的预检会被拦截。
+        if req.method() == axum::http::Method::OPTIONS {
+            let mut inner = self.inner.clone();
+            return Box::pin(async move { inner.call(req).await });
+        }
+
         let path = req.uri().path().to_string();
         // 检查路径是否在忽略列表中：
         // 1. 精确匹配
@@ -170,6 +180,13 @@ fn validate_and_extract_claims(secret: &str, token: &str) -> Result<TokenClaims,
         &Validation::default(),
     )
     .map_err(|e| format!("Token 验证失败: {}", e))?;
+
+    // 安全修复 P1-3：拒绝 Refresh Token 被当作 Access Token 使用。
+    // Refresh Token 有效期更长且携带空权限数组，若被接受为 Access Token，
+    // 会延长攻击者对仅按 claims.sub 过滤的用户端点的访问窗口。
+    if token_data.claims.token_type != Some(TokenType::Access) {
+        return Err("Token 类型不正确，需要 Access Token".into());
+    }
 
     Ok(token_data.claims)
 }

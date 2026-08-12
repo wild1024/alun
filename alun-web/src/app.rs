@@ -619,6 +619,16 @@ impl App {
     }
 
     /// 构建中间件链
+    ///
+    /// axum 的 `router.layer()` 语义：后添加的 layer 包裹在外层。
+    /// 因此添加顺序 = 从内到外，执行顺序 = 从外到内（后添加的先收到请求、后处理响应）。
+    ///
+    /// 目标执行顺序（从外到内）：
+    ///   SecurityHeaders → CORS → RequestLog → RequestId → RateLimit
+    ///   → Compression → Permission → Auth → handler
+    ///
+    /// 关键：CORS 和 SecurityHeaders 必须在 Auth 外层，
+    /// 否则认证中间件返回 401 时短路，CORS 头缺失导致浏览器报 ERR_FAILED。
     fn build_middleware_chain(
         &self,
         mut router: Router,
@@ -626,11 +636,59 @@ impl App {
         if let Some(ref cm) = self.config_mgr {
             let cfg = cm.get();
 
-            // 安全头：最先注入，确保所有响应都携带
-            if cfg.middleware.security_headers.enabled {
-                router = router.layer(mw::SecurityHeadersLayer::new(
-                    cfg.middleware.security_headers.clone(),
-                ));
+            // ── 内层（先添加）：业务逻辑中间件 ──
+
+            if cfg.middleware.compression.enabled {
+                router = router.layer(CompressionLayer::new().gzip(true));
+            }
+
+            if cfg.middleware.rate_limit.enabled {
+                let rl_layer = mw::RateLimitLayer {
+                    requests_per_window: cfg.middleware.rate_limit.requests_per_window,
+                    window_secs: cfg.middleware.rate_limit.window_secs,
+                    store: self.rate_limit_store.clone(),
+                };
+                router = router.layer(rl_layer);
+            }
+
+            // 权限校验中间件：合并配置文件规则 + 宏注解规则
+            // 先添加 perm_layer，再添加 auth_layer，确保 auth 在 perm 外侧包裹，
+            // 这样请求先从 auth 层进入，AuthClaims 已注入 extensions，然后 perm 层才能读取
+            let mut perm_layer = mw::PermissionCheckLayer::from_config(&cfg.middleware.permission.rules);
+            perm_layer = perm_layer.with_macro_rules(&crate::PERMISSION_ROUTES);
+            if cfg.middleware.permission.enabled && perm_layer.has_rules() {
+                router = router.layer(perm_layer);
+            }
+
+            if cfg.middleware.auth.enabled && !cfg.middleware.auth.jwt_secret.is_empty() {
+                let mut ignore: Vec<String> = cfg.middleware.auth.ignore_paths
+                    .iter().map(|p| format!("{}{}", self.prefix, p)).collect();
+
+                // 合并宏注解标记的无需认证路径
+                for def in crate::NO_AUTH_ROUTES {
+                    let path_with_prefix = format!("{}{}", self.prefix, def.path);
+                    if !ignore.contains(&path_with_prefix) {
+                        ignore.push(path_with_prefix);
+                    }
+                }
+
+                #[cfg(feature = "cache")]
+                let cache = try_cache().cloned();
+                let auth_layer = mw::AuthLayer {
+                    jwt_secret: cfg.middleware.auth.jwt_secret.clone(),
+                    ignore_paths: ignore,
+                    #[cfg(feature = "cache")]
+                    cache,
+                };
+                router = router.layer(auth_layer);
+            }
+
+            // ── 外层（后添加）：请求追踪 + 跨域 + 安全头 ──
+            // 必须在 Auth 之后添加（即 Auth 的外层），
+            // 确保认证 401 响应也携带 CORS 头和安全头。
+
+            if cfg.middleware.request_id {
+                router = router.layer(mw::RequestIdLayer);
             }
 
             if cfg.middleware.request_log {
@@ -642,10 +700,6 @@ impl App {
                     log_duration: log_cfg.log_duration,
                 };
                 router = router.layer(log_layer);
-            }
-
-            if cfg.middleware.request_id {
-                router = router.layer(mw::RequestIdLayer);
             }
 
             if cfg.middleware.cors.enabled {
@@ -676,49 +730,11 @@ impl App {
                 router = router.layer(cors);
             }
 
-            if cfg.middleware.compression.enabled {
-                router = router.layer(CompressionLayer::new().gzip(true));
-            }
-
-            if cfg.middleware.rate_limit.enabled {
-                let rl_layer = mw::RateLimitLayer {
-                    requests_per_window: cfg.middleware.rate_limit.requests_per_window,
-                    window_secs: cfg.middleware.rate_limit.window_secs,
-                    store: self.rate_limit_store.clone(),
-                };
-                router = router.layer(rl_layer);
-            }
-
-            // 权限校验中间件：合并配置文件规则 + 宏注解规则
-            // 先添加 perm_layer，再添加 auth_layer，确保 auth 在 perm 外侧包裹，
-            // 这样请求先从 auth 层进入，AuthClaims 已注入 extensions，然后 perm 层才能读取
-            let mut perm_layer = mw::PermissionCheckLayer::from_config(&cfg.middleware.permission.rules);
-            perm_layer = perm_layer.with_macro_rules(&crate::PERMISSION_ROUTES);
-            if cfg.middleware.permission.enabled && perm_layer.has_rules() {
-                router = router.layer(perm_layer);
-            }
-
-            if cfg.middleware.auth.enabled && !cfg.middleware.auth.jwt_secret.is_empty() {
-                let mut ignore: Vec<String> = cfg.middleware.auth.ignore_paths
-                    .iter().map(|p| format!("{}{}", self.prefix, p)).collect();
-                
-                // 合并宏注解标记的无需认证路径
-                for def in crate::NO_AUTH_ROUTES {
-                    let path_with_prefix = format!("{}{}", self.prefix, def.path);
-                    if !ignore.contains(&path_with_prefix) {
-                        ignore.push(path_with_prefix);
-                    }
-                }
-                
-                #[cfg(feature = "cache")]
-                let cache = try_cache().cloned();
-                let auth_layer = mw::AuthLayer {
-                    jwt_secret: cfg.middleware.auth.jwt_secret.clone(),
-                    ignore_paths: ignore,
-                    #[cfg(feature = "cache")]
-                    cache,
-                };
-                router = router.layer(auth_layer);
+            // 安全头：最后添加（最外层），确保所有响应（含 401/403/500）都携带安全头
+            if cfg.middleware.security_headers.enabled {
+                router = router.layer(mw::SecurityHeadersLayer::new(
+                    cfg.middleware.security_headers.clone(),
+                ));
             }
         }
         router

@@ -36,19 +36,30 @@ use validator::ValidationError;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValidatedJson<T>(pub T);
 
-/// 实现 axum 的 `FromRequest` 提取器，将 JSON 请求体解析为 `T` 类型。
+/// 实现 axum 的 `FromRequest` 提取器，将 JSON 请求体解析为 `T` 类型并自动校验。
 ///
 /// 解析失败时返回 `ValidatedJsonRejection`，该 rejection 会转换为 HTTP 400 响应。
+/// 校验失败时返回 HTTP 422 响应，包含格式化的校验错误列表。
 impl<T, S> FromRequest<S> for ValidatedJson<T>
 where
-    T: DeserializeOwned,
+    T: DeserializeOwned + validator::Validate,
     S: Send + Sync,
 {
     type Rejection = ValidatedJsonRejection;
 
     async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
         match Json::<T>::from_request(req, state).await {
-            Ok(Json(value)) => Ok(ValidatedJson(value)),
+            Ok(Json(value)) => {
+                // 反序列化后立即执行字段级校验（length/email/custom 等）
+                // 修复：此前 from_request 仅反序列化未调用 validate()，导致所有
+                // #[validate(...)] 注解被静默跳过
+                value.validate().map_err(|e| {
+                    ValidatedJsonRejection(ApiError::unprocessable_entity(
+                        alun_utils::valid::Valid::format_validation_errors(&e)
+                    ))
+                })?;
+                Ok(ValidatedJson(value))
+            }
             Err(rejection) => {
                 let msg = format!("请求体格式错误: {}", rejection.body_text());
                 Err(ValidatedJsonRejection(ApiError::bad_request(msg)))
