@@ -213,9 +213,14 @@ impl Drop for ActiveTx {
     }
 }
 
+/// 事务行转换宏（含 BigDecimal 分支，适用于 Postgres / MySql）
+///
+/// 与 db.rs 的 impl_db_ops 宏保持一致：numeric 列经 BigDecimal 解码后转为 JSON Number，
+/// 避免 get_as::<f64> 因 String 反序列化失败而返回 0.0。
 macro_rules! tx_row_convert {
     ($func_name:ident, $db_ty:ty) => {
         fn $func_name(row: &<$db_ty as sqlx::Database>::Row) -> crate::Row {
+            use chrono::{DateTime, Utc, NaiveDate};
             let mut r = crate::Row::default();
             for col in <$db_ty as sqlx::Database>::Row::columns(row) {
                 let name = col.name().to_string();
@@ -230,12 +235,65 @@ macro_rules! tx_row_convert {
                     r.data.insert(name, Value::String(v));
                 } else if let Ok(v) = row.try_get::<sqlx::types::Uuid, usize>(idx) {
                     r.data.insert(name, Value::String(v.to_string()));
+                } else if let Ok(v) = row.try_get::<DateTime<Utc>, usize>(idx) {
+                    r.data.insert(name, Value::String(v.to_rfc3339()));
+                } else if let Ok(v) = row.try_get::<NaiveDate, usize>(idx) {
+                    r.data.insert(name, Value::String(v.format("%Y-%m-%d").to_string()));
+                } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
+                    if let Some(n) = Number::from_f64(v) {
+                        r.data.insert(name, Value::Number(n));
+                    }
+                } else if let Ok(v) = row.try_get::<sqlx::types::BigDecimal, usize>(idx) {
+                    // PostgreSQL numeric 列需经 BigDecimal 解码，再转为 JSON Number，
+                    // 否则 get_as::<f64> 会因 String 反序列化失败而返回 0.0。
+                    let s = v.to_string();
+                    if let Ok(n) = s.parse::<Number>() {
+                        r.data.insert(name, Value::Number(n));
+                    }
+                } else if let Ok(v) = row.try_get::<bool, usize>(idx) {
+                    r.data.insert(name, Value::Bool(v));
+                } else if let Ok(v) = row.try_get::<serde_json::Value, usize>(idx) {
+                    r.data.insert(name, v);
+                }
+            }
+            r
+        }
+    };
+}
+
+/// 事务行转换宏（无 BigDecimal 分支，适用于 SQLite）
+///
+/// SQLite 不支持 BigDecimal 解码，使用 f64 直接读取 REAL 列。
+macro_rules! tx_row_convert_no_bigdecimal {
+    ($func_name:ident, $db_ty:ty) => {
+        fn $func_name(row: &<$db_ty as sqlx::Database>::Row) -> crate::Row {
+            use chrono::{DateTime, Utc, NaiveDate};
+            let mut r = crate::Row::default();
+            for col in <$db_ty as sqlx::Database>::Row::columns(row) {
+                let name = col.name().to_string();
+                let idx: usize = col.ordinal();
+                if let Ok(v) = row.try_get::<i64, usize>(idx) {
+                    r.data.insert(name, Value::Number(v.into()));
+                } else if let Ok(v) = row.try_get::<i32, usize>(idx) {
+                    r.data.insert(name, Value::Number((v as i64).into()));
+                } else if let Ok(v) = row.try_get::<i16, usize>(idx) {
+                    r.data.insert(name, Value::Number((v as i64).into()));
+                } else if let Ok(v) = row.try_get::<String, usize>(idx) {
+                    r.data.insert(name, Value::String(v));
+                } else if let Ok(v) = row.try_get::<sqlx::types::Uuid, usize>(idx) {
+                    r.data.insert(name, Value::String(v.to_string()));
+                } else if let Ok(v) = row.try_get::<DateTime<Utc>, usize>(idx) {
+                    r.data.insert(name, Value::String(v.to_rfc3339()));
+                } else if let Ok(v) = row.try_get::<NaiveDate, usize>(idx) {
+                    r.data.insert(name, Value::String(v.format("%Y-%m-%d").to_string()));
                 } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
                     if let Some(n) = Number::from_f64(v) {
                         r.data.insert(name, Value::Number(n));
                     }
                 } else if let Ok(v) = row.try_get::<bool, usize>(idx) {
                     r.data.insert(name, Value::Bool(v));
+                } else if let Ok(v) = row.try_get::<serde_json::Value, usize>(idx) {
+                    r.data.insert(name, v);
                 }
             }
             r
@@ -245,7 +303,7 @@ macro_rules! tx_row_convert {
 
 tx_row_convert!(tx_row_to_row_pg, sqlx::Postgres);
 tx_row_convert!(tx_row_to_row_my, sqlx::MySql);
-tx_row_convert!(tx_row_to_row_sqlite, sqlx::Sqlite);
+tx_row_convert_no_bigdecimal!(tx_row_to_row_sqlite, sqlx::Sqlite);
 
 /// 执行事务 —— 传入闭包接收 `ActiveTx`，自动管理 BEGIN / COMMIT / ROLLBACK
 ///

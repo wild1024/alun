@@ -522,6 +522,107 @@ impl Db {
         }
     }
 
+    /// 执行原始 SQL 脚本（支持多条语句，按分号分隔）
+    ///
+    /// 使用 sqlx::raw_sql 执行完整的 SQL 脚本，适用于数据库迁移场景。
+    /// 支持多条 SQL 语句、PostgreSQL 的 DO $$ 块、PL/pgSQL 函数等复杂语法。
+    /// 整个脚本在一个隐式事务中执行，任一语句失败则全部回滚。
+    ///
+    /// # 参数
+    ///
+    /// - `sql`: 完整的 SQL 脚本字符串
+    ///
+    /// # 返回值
+    ///
+    /// - `Ok(())`: 脚本执行成功
+    /// - `Err(_)`: 数据库错误
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// db.execute_raw_sql("CREATE TABLE foo (id INT); INSERT INTO foo VALUES (1);").await?;
+    /// ```
+    pub async fn execute_raw_sql(&self, sql: &str) -> DbResult<()> {
+        match &self.pool {
+            DbPool::Postgres(pool) => {
+                sqlx::raw_sql(sql).execute(pool).await.map_err(DbError::from)?;
+            }
+            DbPool::Mysql(pool) => {
+                sqlx::raw_sql(sql).execute(pool).await.map_err(DbError::from)?;
+            }
+            DbPool::Sqlite(pool) => {
+                sqlx::raw_sql(sql).execute(pool).await.map_err(DbError::from)?;
+            }
+            DbPool::Any(_) => {
+                return Err(DbError::Other("Any 连接池不支持 execute_raw_sql，请使用具体数据库类型".into()));
+            }
+        }
+        Ok(())
+    }
+
+    /// 使用 sqlx 内置 Migrator 执行迁移
+    ///
+    /// 通过 sqlx::migrate::Migrator 执行迁移，自动维护 `_sqlx_migrations` 表。
+    /// 支持迁移版本追踪、checksum 校验、事务回滚等特性。
+    ///
+    /// # 参数
+    ///
+    /// - `migrator`: sqlx Migrator 实例
+    ///
+    /// # 返回值
+    ///
+    /// - `Ok(())`: 迁移执行成功
+    /// - `Err(_)`: 数据库错误
+    pub async fn run_sqlx_migrator(&self, migrator: &sqlx::migrate::Migrator) -> DbResult<()> {
+        match &self.pool {
+            DbPool::Postgres(pool) => {
+                migrator.run(pool).await.map_err(DbError::from)?;
+            }
+            DbPool::Mysql(pool) => {
+                migrator.run(pool).await.map_err(DbError::from)?;
+            }
+            DbPool::Sqlite(pool) => {
+                migrator.run(pool).await.map_err(DbError::from)?;
+            }
+            DbPool::Any(_) => {
+                return Err(DbError::Other("Any 连接池不支持 sqlx Migrator".into()));
+            }
+        }
+        Ok(())
+    }
+
+    /// 使用 sqlx Migrator 回滚指定数量的迁移
+    ///
+    /// 通过 sqlx::migrate::Migrator 的 undo 功能回滚最近 `count` 个迁移。
+    /// 需要对应的 `.down.sql` 回滚文件存在。
+    ///
+    /// # 参数
+    ///
+    /// - `migrator`: sqlx Migrator 实例
+    /// - `count`: 回滚的迁移数量
+    ///
+    /// # 返回值
+    ///
+    /// - `Ok(())`: 回滚成功
+    /// - `Err(_)`: 数据库错误
+    pub async fn undo_sqlx_migrator(&self, migrator: &sqlx::migrate::Migrator, count: i64) -> DbResult<()> {
+        match &self.pool {
+            DbPool::Postgres(pool) => {
+                migrator.undo(pool, count).await.map_err(DbError::from)?;
+            }
+            DbPool::Mysql(pool) => {
+                migrator.undo(pool, count).await.map_err(DbError::from)?;
+            }
+            DbPool::Sqlite(pool) => {
+                migrator.undo(pool, count).await.map_err(DbError::from)?;
+            }
+            DbPool::Any(_) => {
+                return Err(DbError::Other("Any 连接池不支持 sqlx Migrator undo".into()));
+            }
+        }
+        Ok(())
+    }
+
     // ── 事务 ─────────────────────────────────────────
 
     /// 在事务闭包中执行操作，自动 BEGIN/COMMIT/ROLLBACK

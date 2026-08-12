@@ -96,10 +96,19 @@ fn build_connection_url(config: &DatabaseConfig, password: &str) -> String {
     let port = config.port.unwrap_or(default_port(&config.r#type));
 
     match config.r#type.as_str() {
-        "postgres" | "postgresql" => format!(
-            "postgres://{}:{}@{}:{}/{}",
-            config.user, password, config.host, port, config.name
-        ),
+        "postgres" | "postgresql" => {
+            let base = format!(
+                "postgres://{}:{}@{}:{}/{}",
+                config.user, password, config.host, port, config.name
+            );
+            // 追加 sslmode 参数：非空时拼接到连接 URL，控制是否强制加密传输
+            // 默认 "prefer"：尝试 SSL，失败回退明文；生产环境应设为 "require"
+            if config.ssl_mode.is_empty() {
+                base
+            } else {
+                format!("{}?sslmode={}", base, config.ssl_mode)
+            }
+        }
         "mysql" => format!(
             "mysql://{}:{}@{}:{}/{}",
             config.user, password, config.host, port, config.name

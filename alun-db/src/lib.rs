@@ -34,6 +34,9 @@ pub enum DbError {
     #[error("数据库错误: {0}")]
     Sqlx(#[from] sqlx::Error),
 
+    #[error("迁移错误: {0}")]
+    Migrate(#[from] sqlx::migrate::MigrateError),
+
     #[error("序列化错误: {0}")]
     Serde(#[from] serde_json::Error),
 
