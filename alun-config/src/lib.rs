@@ -165,6 +165,14 @@ pub struct DatabaseConfig {
     #[serde(default)]
     pub slow_query_ms: u64,
 
+    /// SSL 连接模式（postgres 专用）
+    ///
+    /// 可选值：`disable` / `prefer` / `require` / `verify-ca` / `verify-full`
+    /// - `prefer`（默认）：尝试 SSL，失败回退明文，兼容无 SSL 旧环境
+    /// - `require`：强制 SSL，生产环境推荐（需数据库端启用 SSL）
+    #[serde(default = "default_ssl_mode")]
+    pub ssl_mode: String,
+
     /// 迁移配置
     #[serde(default)]
     pub migration: MigrationConfig,
@@ -604,6 +612,7 @@ fn default_log_prefix() -> String { "alun".into() }
 fn default_db_type() -> String { "postgres".into() }
 fn default_host() -> String { "localhost".into() }
 fn default_true() -> bool { true }
+fn default_ssl_mode() -> String { "prefer".into() }
 fn default_pool_size() -> u32 { 10 }
 fn default_min_idle() -> u32 { 2 }
 fn default_timeout() -> u64 { 10 }
@@ -673,6 +682,7 @@ impl Default for DatabaseConfig {
             password_encrypted: false,
             max_connections: default_pool_size(), min_connections: default_min_idle(),
             connect_timeout: default_timeout(), sql_logging: false, slow_query_ms: 0,
+            ssl_mode: default_ssl_mode(),
             migration: MigrationConfig::default(),
         }
     }
@@ -830,9 +840,10 @@ fn merge_configs(base: &mut AppConfig, overlay: &AppConfig) {
     if overlay.log.format != default_log_format() { base.log.format = overlay.log.format.clone(); }
     if overlay.log.dir.is_some() { base.log.dir = overlay.log.dir.clone(); }
     if overlay.log.file_prefix != default_log_prefix() { base.log.file_prefix = overlay.log.file_prefix.clone(); }
-    if overlay.database.host != default_host() || !overlay.database.name.is_empty() {
-        base.database = overlay.database.clone();
-    }
+    // 数据库采用字段级合并：仅覆盖 profile 文件中显式配置的项
+    // 修复：此前仅当 host/name 变化时才整体替换 database 段，
+    // 导致 ssl_mode/max_connections 等字段在 host 走 env 覆盖时被忽略
+    merge_database(&mut base.database, &overlay.database);
     if overlay.redis.url != default_redis_url() { base.redis = overlay.redis.clone(); }
     if overlay.cache.r#type != default_cache_type() { base.cache = overlay.cache.clone(); }
     if overlay.router.prefix != String::new() { base.router.prefix = overlay.router.prefix.clone(); }
@@ -857,6 +868,30 @@ fn merge_configs(base: &mut AppConfig, overlay: &AppConfig) {
     for (k, v) in &overlay.custom { base.custom.insert(k.clone(), v.clone()); }
 }
 
+/// 数据库配置字段级合并
+///
+/// 仅覆盖 profile 文件中显式配置的字段（与默认值不同的字段），
+/// 未在 profile 中设置的字段保留 base 配置的值。
+fn merge_database(base: &mut DatabaseConfig, overlay: &DatabaseConfig) {
+    if overlay.enabled { base.enabled = true; }
+    if overlay.r#type != default_db_type() { base.r#type = overlay.r#type.clone(); }
+    if overlay.host != default_host() { base.host = overlay.host.clone(); }
+    if overlay.port.is_some() { base.port = overlay.port; }
+    if !overlay.name.is_empty() { base.name = overlay.name.clone(); }
+    if !overlay.user.is_empty() { base.user = overlay.user.clone(); }
+    if !overlay.password.is_empty() { base.password = overlay.password.clone(); }
+    if overlay.password_encrypted { base.password_encrypted = true; }
+    if overlay.max_connections != default_pool_size() { base.max_connections = overlay.max_connections; }
+    if overlay.min_connections != default_min_idle() { base.min_connections = overlay.min_connections; }
+    if overlay.connect_timeout != default_timeout() { base.connect_timeout = overlay.connect_timeout; }
+    if overlay.sql_logging { base.sql_logging = true; }
+    if overlay.slow_query_ms != 0 { base.slow_query_ms = overlay.slow_query_ms; }
+    if overlay.ssl_mode != default_ssl_mode() { base.ssl_mode = overlay.ssl_mode.clone(); }
+    if overlay.migration.enabled { base.migration.enabled = true; }
+    if overlay.migration.path != default_migration_path() { base.migration.path = overlay.migration.path.clone(); }
+    if overlay.migration.auto_migrate { base.migration.auto_migrate = true; }
+}
+
 fn merge_middleware(base: &mut MiddlewareConfig, overlay: &MiddlewareConfig) {
     let default_mw = MiddlewareConfig::default();
     if overlay.request_id != default_mw.request_id { base.request_id = overlay.request_id; }
@@ -875,9 +910,41 @@ fn merge_middleware(base: &mut MiddlewareConfig, overlay: &MiddlewareConfig) {
     if overlay.cors.enabled != default_mw.cors.enabled { base.cors.enabled = overlay.cors.enabled; }
     if !overlay.cors.allow_origins.is_empty() { base.cors.allow_origins = overlay.cors.allow_origins.clone(); }
     if overlay.compression.enabled != default_mw.compression.enabled { base.compression.enabled = overlay.compression.enabled; }
-    if overlay.rate_limit.enabled != default_mw.rate_limit.enabled { base.rate_limit.enabled = overlay.rate_limit.enabled; }
-    if overlay.rate_limit.requests_per_window != 0 { base.rate_limit.requests_per_window = overlay.rate_limit.requests_per_window; }
-    if overlay.rate_limit.window_secs != 0 { base.rate_limit.window_secs = overlay.rate_limit.window_secs; }
+
+    // rate_limit：如果 profile 中显式配置了任何字段（与默认值不同），整体替换
+    // 修复：此前 enabled=false 与默认值 false 相同，导致无法覆盖 config.toml 中的 enabled=true
+    let default_rl = RateLimitConfig::default();
+    if overlay.rate_limit.enabled != default_rl.enabled
+        || overlay.rate_limit.requests_per_window != default_rl.requests_per_window
+        || overlay.rate_limit.window_secs != default_rl.window_secs
+    {
+        base.rate_limit = overlay.rate_limit.clone();
+    }
+
+    // security_headers 字段级合并（与默认值比较，仅覆盖显式配置的字段）
+    if overlay.security_headers.enabled != default_mw.security_headers.enabled {
+        base.security_headers.enabled = overlay.security_headers.enabled;
+    }
+    if !overlay.security_headers.hsts {
+        base.security_headers.hsts = false;
+    }
+    if !overlay.security_headers.csp {
+        base.security_headers.csp = false;
+    }
+    if overlay.security_headers.csp_value != default_mw.security_headers.csp_value {
+        base.security_headers.csp_value = overlay.security_headers.csp_value.clone();
+    }
+    if !overlay.security_headers.permissions_policy {
+        base.security_headers.permissions_policy = false;
+    }
+
+    // permission 字段级合并
+    if overlay.permission.enabled != default_mw.permission.enabled {
+        base.permission.enabled = overlay.permission.enabled;
+    }
+    if !overlay.permission.rules.is_empty() {
+        base.permission.rules = overlay.permission.rules.clone();
+    }
 }
 
 #[cfg(test)]

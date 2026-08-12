@@ -48,7 +48,17 @@ pub fn parse_args() -> (bool, bool) {
 ///   - `ALUN_SERVER_LISTEN=3000`
 ///   - `ALUN_DATABASE_NAME=mydb`
 ///   - `ALUN_LOG_LEVEL=debug`
+///
+/// 安全敏感字段支持专用别名：
+///   - `FACAI_JWT_SECRET` / `ALUN_MIDDLEWARE_AUTH_JWT_SECRET`：JWT 签名密钥（生产环境必填）
 pub fn merge_env_overrides(cfg: &mut AppConfig) {
+    // 专用别名：FACAI_JWT_SECRET 优先覆盖 JWT 密钥（安全修复 P0-5）
+    if let Ok(value) = env::var("FACAI_JWT_SECRET") {
+        if !value.is_empty() {
+            cfg.middleware.auth.jwt_secret = value;
+        }
+    }
+
     for (key, value) in env::vars() {
         if !key.starts_with("ALUN_") || value.is_empty() {
             continue;
@@ -66,12 +76,14 @@ pub fn merge_env_overrides(cfg: &mut AppConfig) {
             ["database", "name"] => cfg.database.name = value,
             ["database", "user"] => cfg.database.user = value,
             ["database", "password"] => cfg.database.password = value,
+            ["database", "ssl", "mode"] => cfg.database.ssl_mode = value,
             ["redis", "url"] => cfg.redis.url = value,
             ["cache", "type"] => cfg.cache.r#type = value,
             ["router", "prefix"] => cfg.router.prefix = value,
             ["upload", "path"] => cfg.upload.path = value,
             ["download", "path"] => cfg.download.path = value,
             ["template", "path"] => cfg.template.path = value,
+            ["middleware", "auth", "jwt", "secret"] => cfg.middleware.auth.jwt_secret = value,
             _ => {}
         }
     }
