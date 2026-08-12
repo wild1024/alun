@@ -145,6 +145,9 @@ mod tests {
         async fn write(&self, _name: &str, _data: &[u8]) -> Result<FileMeta, String> {
             Err("not implemented".into())
         }
+        async fn write_at(&self, _path: &str, _data: &[u8]) -> Result<FileMeta, String> {
+            Err("not implemented".into())
+        }
         async fn read(&self, _path: &str) -> Result<Vec<u8>, String> {
             Err("not implemented".into())
         }

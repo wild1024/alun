@@ -169,6 +169,39 @@ impl StorageBackend for MinioBackend {
         })
     }
 
+    async fn write_at(&self, relative_path: &str, data: &[u8]) -> Result<FileMeta, String> {
+        use aws_sdk_s3::primitives::ByteStream;
+
+        // 按调用方指定的相对路径写入（不做日期分目录/UUID 重命名）
+        let content_type = Self::mime_type(relative_path);
+        let data_len = data.len() as u64;
+
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(relative_path)
+            .body(ByteStream::from(data.to_vec()))
+            .content_type(&content_type)
+            .send()
+            .await
+            .map_err(|e| format!("MinIO write_at 失败: {}", e))?;
+
+        tracing::info!(
+            "MinIO write_at 成功: {} ({} bytes)",
+            relative_path,
+            data_len
+        );
+
+        Ok(FileMeta {
+            file_id: Uuid::new_v4().to_string(),
+            original_name: relative_path.to_string(),
+            stored_path: relative_path.to_string(),
+            size: data_len,
+            content_type,
+            created_at: Utc::now(),
+        })
+    }
+
     async fn read(&self, stored_path: &str) -> Result<Vec<u8>, String> {
         let resp = self
             .client

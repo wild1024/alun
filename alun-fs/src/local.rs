@@ -156,7 +156,17 @@ impl LocalFs {
         } else {
             path.to_path_buf()
         };
-        self.root_dir.join(path)
+        // 安全修复 P3-2：仅保留 Normal 分量，剥离 CurDir(`.`) 与 ParentDir(`..`)，
+        // 防止 `../../etc/passwd` 之类路径遍历越界访问 root_dir 之外的文件。
+        // 当前 file_path 由服务端生成（YYYY/MM/DD/uuid.ext）不含 `..`，此处为纵深防御，
+        // 任何未来将用户可控数据传入 fs.read/fs.write_at 的代码路径均不会构成遍历。
+        let mut safe = self.root_dir.clone();
+        for component in path.components() {
+            if let std::path::Component::Normal(part) = component {
+                safe.push(part);
+            }
+        }
+        safe
     }
 
     async fn ensure_parent(&self, full_path: &Path) -> StoreResult<()> {
@@ -177,6 +187,11 @@ impl StorageBackend for LocalFs {
 
     async fn write(&self, original_name: &str, data: &[u8]) -> Result<FileMeta, String> {
         self.write_with_name(original_name, data).await
+    }
+
+    async fn write_at(&self, relative_path: &str, data: &[u8]) -> Result<FileMeta, String> {
+        // 委托给已有的 inherent 方法，避免方法名遮蔽（trait 方法显式转发）
+        LocalFs::write_at(self, relative_path, data).await
     }
 
     async fn read(&self, stored_path: &str) -> Result<Vec<u8>, String> {

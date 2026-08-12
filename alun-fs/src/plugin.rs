@@ -123,6 +123,23 @@ impl FsPlugin {
         self.write_to(None, filename, data).await
     }
 
+    /// 按指定相对路径写入文件（使用默认后端）
+    ///
+    /// 与 `write` 不同，此方法完全由调用方指定存储路径，
+    /// 后端不做日期分目录/UUID 重命名等自动处理。
+    ///
+    /// 用于需要精确控制物理存储位置的场景，例如公开/私有文件物理隔离：
+    /// - 公开文件写入 `public/YYYY/MM/DD/uuid.ext`
+    /// - 私有文件写入 `private/YYYY/MM/DD/uuid.ext`
+    ///
+    /// # 参数
+    /// - `relative_path` - 存储相对路径（相对于后端根目录）
+    /// - `data` - 文件字节内容
+    pub async fn write_at(&self, relative_path: &str, data: &[u8]) -> StoreResult<FileMeta> {
+        let backend = self.resolve_backend(None)?;
+        backend.write_at(relative_path, data).await
+    }
+
     /// 读取文件内容
     ///
     /// # 参数

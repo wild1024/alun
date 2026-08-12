@@ -43,6 +43,24 @@ pub trait StorageBackend: Send + Sync {
     /// - `Err(String)` - 写入失败原因
     async fn write(&self, original_name: &str, data: &[u8]) -> Result<FileMeta, String>;
 
+    /// 按指定相对路径写入文件
+    ///
+    /// 与 `write` 不同，此方法**完全由调用方指定存储路径**，
+    /// 后端不做日期分目录/UUID 重命名等自动处理，仅按给定路径写入。
+    ///
+    /// 用于需要精确控制物理存储位置的场景，例如：
+    /// - 公开/私有文件物理隔离：`public/YYYY/MM/DD/uuid.ext` vs `private/YYYY/MM/DD/uuid.ext`
+    /// - 按业务子目录归档：`avatars/2026/...`、`covers/...`
+    ///
+    /// # 参数
+    /// - `relative_path` - 存储相对路径（相对于后端根目录，如 `public/2026/08/06/uuid.ext`）
+    /// - `data` - 文件字节内容
+    ///
+    /// # 返回
+    /// - `Ok(FileMeta)` - 写入成功，返回元数据（stored_path 即为传入的 relative_path）
+    /// - `Err(String)` - 写入失败原因
+    async fn write_at(&self, relative_path: &str, data: &[u8]) -> Result<FileMeta, String>;
+
     /// 读取文件全部内容
     ///
     /// # 参数
