@@ -52,11 +52,6 @@ pub(crate) enum ActiveTxInner {
 }
 
 impl ActiveTx {
-    /// 创建活跃事务句柄（内部使用，由 `Db::tx` 调用）
-    pub(crate) fn new(inner: ActiveTxInner) -> Self {
-        Self { inner, committed: false, rolled_back: false }
-    }
-
     /// 在事务中执行写操作（INSERT/UPDATE/DELETE），返回受影响行数
     ///
     /// 参数使用 `$1`、`$2` 占位符，按顺序绑定。
