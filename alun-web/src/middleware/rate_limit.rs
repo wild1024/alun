@@ -88,15 +88,7 @@ where
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let ip = req.headers()
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown")
-            .split(',')
-            .next()
-            .unwrap_or("unknown")
-            .trim()
-            .to_string();
+        let ip = extract_trusted_client_ip(&req);
 
         let max_req = self.requests_per_window;
         let win_secs = self.window_secs;
@@ -135,5 +127,105 @@ where
                 .expect("response body build failed");
             Box::pin(async move { Ok(resp) })
         }
+    }
+}
+
+/// 提取可信的客户端 IP，作为限流键
+///
+/// **安全说明（S-01）**：`X-Forwarded-For` 的**首段**由客户端可控，若直接取首段作为限流键，
+/// 攻击者轮换伪造值即可无限绕过限流。本实现遵循两条可信来源（与部署拓扑强相关，后端位于
+/// nginx 之后）：
+///
+/// 1. `X-Real-IP`：由 nginx `proxy_set_header X-Real-IP $remote_addr` 覆写为真实客户端 IP（不可伪造）；
+/// 2. `X-Forwarded-For` **末段**：nginx `$proxy_add_x_forwarded_for` 将真实客户端 IP 追加在末尾。
+///
+/// 无法从以上来源取得合法 IP 时回退为 `"unknown"`（所有此类请求共享同一限流桶，避免绕过）。
+fn extract_trusted_client_ip(req: &Request<Body>) -> String {
+    fn valid_ip(s: &str) -> bool {
+        s.parse::<std::net::IpAddr>().is_ok()
+    }
+
+    // 1. 优先 X-Real-IP（nginx 覆写，最可信）
+    if let Some(ip) = req
+        .headers()
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim())
+        .filter(|s| valid_ip(s))
+    {
+        return ip.to_string();
+    }
+
+    // 2. 回退 X-Forwarded-For 末段（nginx 追加的真实客户端 IP）
+    if let Some(ip) = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next_back())
+        .map(|v| v.trim())
+        .filter(|s| valid_ip(s))
+    {
+        return ip.to_string();
+    }
+
+    "unknown".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request_with_headers(entries: &[(&str, &str)]) -> Request<Body> {
+        let mut builder = Request::builder();
+        for (k, v) in entries {
+            builder = builder.header(*k, *v);
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn x_real_ip_takes_priority_over_forged_xff() {
+        // X-Real-IP 为可信真实 IP，即使 XFF 首段被伪造也应作为限流键
+        let req = request_with_headers(&[
+            ("x-forwarded-for", "1.2.3.4, 203.0.113.9"),
+            ("x-real-ip", "203.0.113.9"),
+        ]);
+        assert_eq!(extract_trusted_client_ip(&req), "203.0.113.9");
+    }
+
+    #[test]
+    fn xff_uses_last_segment_not_attacker_first_segment() {
+        // S-01：修复前取 XFF 首段（攻击者可控），修复后取末段（nginx 追加）作为限流键
+        let req = request_with_headers(&[("x-forwarded-for", "1.2.3.4, 198.51.100.7")]);
+        assert_eq!(extract_trusted_client_ip(&req), "198.51.100.7");
+    }
+
+    #[test]
+    fn rotation_of_forged_first_segment_keeps_same_key() {
+        // 攻击者轮换伪造首段值，但真实末段不变 → 限流键恒定，无法绕过
+        let forged_rotations = ["8.8.8.8", "9.9.9.9", "6.6.6.6"];
+        let base = "198.51.100.7";
+        for forged in forged_rotations {
+            let req = request_with_headers(&[(
+                "x-forwarded-for",
+                &format!("{forged}, {base}"),
+            )]);
+            assert_eq!(extract_trusted_client_ip(&req), base);
+        }
+    }
+
+    #[test]
+    fn single_hop_xff_returns_itself() {
+        let req = request_with_headers(&[("x-forwarded-for", "203.0.113.42")]);
+        assert_eq!(extract_trusted_client_ip(&req), "203.0.113.42");
+    }
+
+    #[test]
+    fn invalid_ip_falls_back_to_unknown() {
+        // 头非法或缺失时回退 unknown，所有此类请求共享同一限流桶，不退让绕过面
+        let req = request_with_headers(&[]);
+        assert_eq!(extract_trusted_client_ip(&req), "unknown");
+        let evil = request_with_headers(&[("x-forwarded-for", "evil, 12.34.56.78")]);
+        assert_eq!(extract_trusted_client_ip(&evil), "12.34.56.78");
     }
 }

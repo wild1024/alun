@@ -41,12 +41,17 @@ pub fn is_private_ip(ip: &str) -> bool {
 
 /// 从请求头提取客户端真实 IP
 ///
+/// **安全说明（S-02）**：不得信任 `X-Forwarded-For` 的**首段**——它由客户端可控，
+/// 攻击者轮换伪造值即可绕过登录/接口的 IP 限流。真实可信来源取决于部署拓扑：
+/// 后端通常位于 nginx 之后，其中：
+/// - `X-Real-IP`：被 nginx `proxy_set_header X-Real-IP $remote_addr` 覆写为真实客户端 IP（不可伪造）；
+/// - `X-Forwarded-For` **末段**：nginx `$proxy_add_x_forwarded_for` 将真实客户端 IP 追加在末尾。
+///
 /// # 优先级
-/// 1. CF-Connecting-IP（Cloudflare CDN）
-/// 2. X-Forwarded-For（首个非私有 IP，AWS ELB/代理场景）
-/// 3. X-Real-IP / X-Client-IP / X-Cluster-Client-IP
-/// 4. 连接地址 IP
-/// 5. 回退至 "0.0.0.0"
+/// 1. `X-Real-IP`（可信代理覆写，最可信）
+/// 2. `X-Forwarded-For` 末段（可信代理追加的真实客户端 IP）
+/// 3. 连接对端 IP（app 直连场景，未经过代理）
+/// 4. 回退至 "0.0.0.0"
 ///
 /// # 参数
 /// - `headers`: HTTP 请求头
@@ -55,28 +60,30 @@ pub fn is_private_ip(ip: &str) -> bool {
 /// # 返回
 /// 客户端真实 IP 字符串，若无法获取则返回 "0.0.0.0"
 pub fn extract_client_ip(headers: &http::HeaderMap, connect_info: &SocketAddr) -> String {
-    if let Some(cf_ip) = headers.get("CF-Connecting-IP").and_then(|h| h.to_str().ok()) {
-        return cf_ip.to_string();
+    fn is_valid_ip(s: &str) -> bool {
+        s.trim().parse::<std::net::IpAddr>().is_ok()
     }
 
-    if let Some(x_forwarded_for) = headers.get("X-Forwarded-For").and_then(|h| h.to_str().ok()) {
-        for ip in x_forwarded_for.split(',') {
-            let trimmed = ip.trim();
-            if !is_private_ip(trimmed) {
-                return trimmed.to_string();
-            }
-        }
+    // 1. X-Real-IP：nginx 覆写为真实客户端 IP（不可伪造）
+    if let Some(ip) = headers
+        .get("X-Real-IP")
+        .and_then(|h| h.to_str().ok())
+        .filter(|s| is_valid_ip(s))
+    {
+        return ip.trim().to_string();
     }
 
-    let other_headers = ["X-Real-IP", "X-Client-IP", "X-Cluster-Client-IP"];
-    for header_name in &other_headers {
-        if let Some(ip) = headers.get(*header_name).and_then(|h| h.to_str().ok()) {
-            if !is_private_ip(ip) {
-                return ip.to_string();
-            }
-        }
+    // 2. X-Forwarded-For：取末段（nginx 追加的真实客户端 IP），避免信任攻击者可控的首段
+    if let Some(ip) = headers
+        .get("X-Forwarded-For")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.split(',').next_back())
+        .filter(|s| is_valid_ip(s))
+    {
+        return ip.trim().to_string();
     }
 
+    // 3. 连接对端 IP（直连场景）
     let connect_ip = connect_info.ip().to_string();
     if !is_private_ip(&connect_ip) {
         return connect_ip;
@@ -149,4 +156,80 @@ fn urlencoding(s: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http::{HeaderMap, HeaderName, HeaderValue};
+    use std::net::SocketAddr;
+
+    /// 构造请求头
+    fn header_maps(entries: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (k, v) in entries {
+            let name: HeaderName = k.parse().unwrap();
+            let value: HeaderValue = v.parse().unwrap();
+            map.insert(name, value);
+        }
+        map
+    }
+
+    /// 构造连接地址（任意端口，仅验证对端 IP 语义）
+    fn connect(ip: &str) -> SocketAddr {
+        format!("{}:54321", ip).parse().unwrap()
+    }
+
+    #[test]
+    fn x_real_ip_takes_priority_over_xff_first_segment() {
+        // 攻击者伪造 XFF 首段，但 X-Real-IP 为真实 IP 时应取 X-Real-IP
+        let headers = header_maps(&[
+            ("x-forwarded-for", "1.2.3.4, 203.0.113.9"),
+            ("x-real-ip", "203.0.113.9"),
+        ]);
+        assert_eq!(
+            extract_client_ip(&headers, &connect("10.0.0.5")),
+            "203.0.113.9"
+        );
+    }
+
+    #[test]
+    fn xff_uses_last_segment_not_attacker_first_segment() {
+        // 无 X-Real-IP 时，XFF 应取末段（nginx 追加的真实客户端 IP），而非攻击者可控的首段
+        let headers = header_maps(&[("x-forwarded-for", "1.2.3.4, 198.51.100.7")]);
+        assert_eq!(
+            extract_client_ip(&headers, &connect("10.0.0.5")),
+            "198.51.100.7"
+        );
+    }
+
+    #[test]
+    fn single_hop_xff_returns_itself() {
+        // 单跳 XFF（无代理追加），取唯一值作为真实 IP
+        let headers = header_maps(&[("x-forwarded-for", "203.0.113.42")]);
+        assert_eq!(
+            extract_client_ip(&headers, &connect("10.0.0.5")),
+            "203.0.113.42"
+        );
+    }
+
+    #[test]
+    fn invalid_ip_in_headers_falls_back() {
+        // 伪造非 IP 首段应忽略，回退到末段合法 IP
+        let headers = header_maps(&[("x-forwarded-for", "not-an-ip, 198.51.100.7")]);
+        assert_eq!(
+            extract_client_ip(&headers, &connect("10.0.0.5")),
+            "198.51.100.7"
+        );
+        // 全部非法时，直连为私网则回退 0.0.0.0
+        let bad = header_maps(&[("x-forwarded-for", "evil")]);
+        assert_eq!(extract_client_ip(&bad, &connect("10.0.0.5")), "0.0.0.0");
+    }
+
+    #[test]
+    fn private_connect_ip_does_not_leak() {
+        // 无任何可信头且直连为私网时，不暴露内部 IP，回退 0.0.0.0
+        let headers = header_maps(&[]);
+        assert_eq!(extract_client_ip(&headers, &connect("10.1.1.1")), "0.0.0.0");
+    }
 }
