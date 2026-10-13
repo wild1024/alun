@@ -13,9 +13,9 @@
 //! plugin.stop().await?;
 //! ```
 
-use async_trait::async_trait;
-use alun_core::{Plugin, Result};
 use alun_cache::SharedCache;
+use alun_core::{Plugin, Result};
+use async_trait::async_trait;
 use parking_lot::RwLock;
 
 /// 缓存插件 —— 管理缓存实例的生命周期
@@ -37,7 +37,11 @@ impl CachePlugin {
     /// 创建缓存插件
     ///
     /// `app_name` 将作为所有缓存 key 的前缀。
-    pub fn new(app_name: &str, cache_config: &alun_config::CacheConfig, redis_config: &alun_config::RedisConfig) -> Self {
+    pub fn new(
+        app_name: &str,
+        cache_config: &alun_config::CacheConfig,
+        redis_config: &alun_config::RedisConfig,
+    ) -> Self {
         Self {
             app_name: app_name.to_string(),
             cache: RwLock::new(None),
@@ -54,10 +58,14 @@ impl CachePlugin {
 
 #[async_trait]
 impl Plugin for CachePlugin {
-    fn name(&self) -> &str { "cache" }
+    fn name(&self) -> &str {
+        "cache"
+    }
 
     async fn start(&self) -> Result<()> {
-        let instance = alun_cache::create_cache(&self.app_name, &self.cache_config, &self.redis_config).await?;
+        let instance =
+            alun_cache::create_cache(&self.app_name, &self.cache_config, &self.redis_config)
+                .await?;
         *self.cache.write() = Some(instance);
         Ok(())
     }

@@ -1,0 +1,87 @@
+[package]
+name = "alun-ledger"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Alun Ledger：多租户 SaaS 计费与账务系统（alun + alun-db 融合验证项目）"
+
+[lib]
+name = "alun_ledger"
+path = "src/lib.rs"
+
+[[bin]]
+name = "alun-ledger"
+path = "src/main.rs"
+
+[dependencies]
+# Web 层：只开 db，避免默认 full 拉入 kafka/task 等重依赖
+alun = { path = "../alun", default-features = false, features = ["db", "cache", "plugin"] }
+alun-core = { path = "../alun-core" }
+alun-web = { path = "../alun-web" }
+alun-config = { path = "../alun-config" }
+alun-cache = { path = "../alun-cache" }
+# 数据层：显式开启生态类型 feature（默认仅 ["sqlite", "async"]）
+alun-db = { path = "../alun-db", features = [
+    "sqlite",
+    "postgres",
+    "mysql",
+    "rust_decimal",
+    "chrono",
+    "json",
+    "uuid",
+] }
+alun-db-core = { path = "../alun-db-core" }
+alun-db-sql = { path = "../alun-db-sql" }
+
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+criterion = { version = "0.5", features = ["async_tokio"] }
+chrono = { workspace = true }
+rust_decimal = { version = "1.43" }
+
+[features]
+default = ["sqlite"]
+sqlite = ["alun-db/sqlite"]
+postgres = ["alun-db/postgres"]
+mysql = ["alun-db/mysql"]
+# 故障注入开关（仅测试启用；由 dev-dependencies 自引用打开）
+failpoint = []
+# 编译期 schema 校验探针（MIG-007 用；见 src/models/probe.rs）
+strict_probe = []
+# 枚举派生缺陷复现（缺陷 D2；见 src/models/probe.rs）
+derive_probe = []
+
+[build-dependencies]
+alun-db-build = { path = "../alun-db-build" }
+
+[dev-dependencies]
+alun-plugin = { path = "../alun-plugin" }
+# 自引用 dev 依赖：让集成测试默认带上 failpoint 开关（生产构建不受影响）
+alun-ledger = { path = ".", features = ["failpoint"] }
+tokio = { workspace = true }
+tower = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { version = "1.43" }
+uuid = { workspace = true }
+
+[[bench]]
+name = "crud"
+harness = false
+
+[[bench]]
+name = "batch"
+harness = false
+
+[[bench]]
+name = "pagination"
+harness = false
+
+[[bench]]
+name = "aggregate"
+harness = false

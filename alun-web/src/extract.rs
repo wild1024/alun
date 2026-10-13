@@ -6,11 +6,11 @@
 //! - 若目标类型实现 Validate trait，则自动调用 validate()
 //! - 也可使用 alun_utils::valid::Valid 独立校验
 
+use crate::api::ApiError;
 use axum::{
     extract::{FromRequest, Json},
     response::{IntoResponse, Response},
 };
-use alun_core::api::ApiError;
 use serde::de::DeserializeOwned;
 use validator::ValidationError;
 
@@ -55,7 +55,7 @@ where
                 // #[validate(...)] 注解被静默跳过
                 value.validate().map_err(|e| {
                     ValidatedJsonRejection(ApiError::unprocessable_entity(
-                        alun_utils::valid::Valid::format_validation_errors(&e)
+                        alun_utils::valid::Valid::format_validation_errors(&e),
                     ))
                 })?;
                 Ok(ValidatedJson(value))
@@ -76,9 +76,7 @@ impl<T: validator::Validate> ValidatedJson<T> {
     /// 校验失败返回 `ApiError::unprocessable_entity`，包含格式化的校验错误列表。
     pub fn validate(self) -> Result<Self, ApiError> {
         self.0.validate().map_err(|e| {
-            ApiError::unprocessable_entity(
-                alun_utils::valid::Valid::format_validation_errors(&e)
-            )
+            ApiError::unprocessable_entity(alun_utils::valid::Valid::format_validation_errors(&e))
         })?;
         Ok(self)
     }
@@ -139,8 +137,7 @@ pub fn validate_uuid(value: &str) -> Result<(), ValidationError> {
     if alun_utils::valid::Valid::is_uuid(value) {
         Ok(())
     } else {
-        Err(ValidationError::new("invalid_uuid")
-            .with_message("必须是有效的 UUID 格式".into()))
+        Err(ValidationError::new("invalid_uuid").with_message("必须是有效的 UUID 格式".into()))
     }
 }
 
@@ -159,8 +156,7 @@ pub fn validate_mobile(value: &str) -> Result<(), ValidationError> {
     if alun_utils::valid::Valid::is_mobile(value) {
         Ok(())
     } else {
-        Err(ValidationError::new("invalid_mobile")
-            .with_message("必须是有效的手机号".into()))
+        Err(ValidationError::new("invalid_mobile").with_message("必须是有效的手机号".into()))
     }
 }
 
@@ -196,8 +192,7 @@ pub fn validate_id_card(value: &str) -> Result<(), ValidationError> {
     if alun_utils::valid::Valid::is_id_card(value) {
         Ok(())
     } else {
-        Err(ValidationError::new("invalid_id_card")
-            .with_message("必须是有效的身份证号".into()))
+        Err(ValidationError::new("invalid_id_card").with_message("必须是有效的身份证号".into()))
     }
 }
 
@@ -216,8 +211,7 @@ pub fn validate_date(value: &str) -> Result<(), ValidationError> {
     if alun_utils::valid::Valid::is_date(value) {
         Ok(())
     } else {
-        Err(ValidationError::new("invalid_date")
-            .with_message("日期格式必须为 YYYY-MM-DD".into()))
+        Err(ValidationError::new("invalid_date").with_message("日期格式必须为 YYYY-MM-DD".into()))
     }
 }
 
@@ -236,8 +230,7 @@ pub fn validate_email(value: &str) -> Result<(), ValidationError> {
     if alun_utils::valid::Valid::is_email(value) {
         Ok(())
     } else {
-        Err(ValidationError::new("invalid_email")
-            .with_message("必须是有效的邮箱格式".into()))
+        Err(ValidationError::new("invalid_email").with_message("必须是有效的邮箱格式".into()))
     }
 }
 
@@ -256,8 +249,7 @@ pub fn validate_url(value: &str) -> Result<(), ValidationError> {
     if alun_utils::valid::Valid::is_url(value) {
         Ok(())
     } else {
-        Err(ValidationError::new("invalid_url")
-            .with_message("必须是有效的 URL 格式".into()))
+        Err(ValidationError::new("invalid_url").with_message("必须是有效的 URL 格式".into()))
     }
 }
 
@@ -294,9 +286,7 @@ pub fn validate_date_or_datetime(value: &str) -> Result<(), ValidationError> {
     if value.is_empty() {
         return Ok(());
     }
-    if alun_utils::valid::Valid::is_datetime(value)
-        || alun_utils::valid::Valid::is_date(value)
-    {
+    if alun_utils::valid::Valid::is_datetime(value) || alun_utils::valid::Valid::is_date(value) {
         Ok(())
     } else {
         Err(ValidationError::new("invalid_date_or_datetime")
@@ -314,9 +304,7 @@ pub trait ValidateExt {
 impl<T: validator::Validate> ValidateExt for T {
     fn validate_or_reject(&self) -> Result<(), ApiError> {
         self.validate().map_err(|e| {
-            ApiError::unprocessable_entity(
-                alun_utils::valid::Valid::format_validation_errors(&e)
-            )
+            ApiError::unprocessable_entity(alun_utils::valid::Valid::format_validation_errors(&e))
         })
     }
 }

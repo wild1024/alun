@@ -4,7 +4,17 @@
 //! 服务端保证同一 key 的请求只执行一次，
 //! 重复请求直接返回缓存的首次响应结果。
 //!
-//! # 使用方式
+//! # 启用方式
+//!
+//! 推荐在配置中声明式启用（`App` 自动接入默认中间件链，无需改业务代码）：
+//!
+//! ```toml
+//! [middleware.idempotency]
+//! enabled = true
+//! ttl_secs = 86400
+//! ```
+//!
+//! 也可在特定写操作路由上手工包裹：
 //!
 //! ```ignore
 //! use alun_web::middleware::IdempotencyLayer;
@@ -15,19 +25,15 @@
 //! ));
 //! ```
 
-use axum::{
-    extract::Request,
-    response::Response,
-    body::Body,
-};
+use alun_cache::Cache;
 use axum::http::StatusCode;
+use axum::{body::Body, extract::Request, response::Response};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tower::{Layer, Service};
-use alun_cache::Cache;
 
 /// 幂等键中间件
 ///
@@ -94,7 +100,8 @@ where
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let idem_key = req.headers()
+        let idem_key = req
+            .headers()
             .get("x-idempotency-key")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
@@ -121,7 +128,8 @@ where
             if has_idem_key {
                 let k = idem_key.expect("has_idem_key checked above");
                 let status = resp.status().as_u16();
-                let content_type = resp.headers()
+                let content_type = resp
+                    .headers()
                     .get("Content-Type")
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("application/json; charset=utf-8")
@@ -133,15 +141,17 @@ where
                     Err(_) => String::new(),
                 };
                 let cache_key = format!("idem:{}", k);
-                let _ = cache.set_ex(
-                    &cache_key,
-                    &CachedResponse {
-                        status,
-                        content_type: content_type.clone(),
-                        body: body_str.clone(),
-                    },
-                    ttl_secs,
-                ).await;
+                let _ = cache
+                    .set_ex(
+                        &cache_key,
+                        &CachedResponse {
+                            status,
+                            content_type: content_type.clone(),
+                            body: body_str.clone(),
+                        },
+                        ttl_secs,
+                    )
+                    .await;
 
                 return Ok(Response::builder()
                     .status(StatusCode::from_u16(status).unwrap_or(StatusCode::OK))

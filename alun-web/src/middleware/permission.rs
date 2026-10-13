@@ -1,17 +1,13 @@
 //! 权限校验中间件
 
-use axum::{
-    extract::Request,
-    response::Response,
-    body::Body,
-};
+use super::AuthClaims;
+use crate::response::{Res, codes};
 use axum::http::StatusCode;
+use axum::{body::Body, extract::Request, response::Response};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
-use crate::response::{Res, codes};
-use super::AuthClaims;
 
 /// 方法级权限拦截层（any 匹配：拥有任意一个权限即放行）
 ///
@@ -24,14 +20,19 @@ pub struct RequirePermissionLayer {
 
 impl RequirePermissionLayer {
     /// 创建 any 匹配的权限拦截层
-    pub fn any(permissions: Vec<String>) -> Self { Self { permissions } }
+    pub fn any(permissions: Vec<String>) -> Self {
+        Self { permissions }
+    }
 }
 
 impl<S> Layer<S> for RequirePermissionLayer {
     type Service = RequirePermissionService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RequirePermissionService { inner, permissions: self.permissions.clone() }
+        RequirePermissionService {
+            inner,
+            permissions: self.permissions.clone(),
+        }
     }
 }
 
@@ -66,23 +67,29 @@ where
                     Box::pin(async move { inner.call(req).await })
                 } else {
                     let body = serde_json::to_string(&Res::<()>::fail(
-                        codes::FORBIDDEN, "无权限访问，权限不足"
-                    )).unwrap_or_else(|_| r#"{"code":403,"msg":"无权限访问，权限不足"}"#.to_string());
+                        codes::FORBIDDEN,
+                        "无权限访问，权限不足",
+                    ))
+                    .unwrap_or_else(|_| r#"{"code":403,"msg":"无权限访问，权限不足"}"#.to_string());
                     let resp = Response::builder()
                         .status(StatusCode::FORBIDDEN)
                         .header("Content-Type", "application/json; charset=utf-8")
-                        .body(Body::from(body)).expect("response body build failed");
+                        .body(Body::from(body))
+                        .expect("response body build failed");
                     Box::pin(async move { Ok(resp) })
                 }
             }
             None => {
                 let body = serde_json::to_string(&Res::<()>::fail(
-                    codes::UNAUTHORIZED, "未认证，请先登录"
-                )).unwrap_or_else(|_| r#"{"code":401,"msg":"未认证，请先登录"}"#.to_string());
+                    codes::UNAUTHORIZED,
+                    "未认证，请先登录",
+                ))
+                .unwrap_or_else(|_| r#"{"code":401,"msg":"未认证，请先登录"}"#.to_string());
                 let resp = Response::builder()
                     .status(StatusCode::UNAUTHORIZED)
                     .header("Content-Type", "application/json; charset=utf-8")
-                    .body(Body::from(body)).expect("response body build failed");
+                    .body(Body::from(body))
+                    .expect("response body build failed");
                 Box::pin(async move { Ok(resp) })
             }
         }

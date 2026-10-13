@@ -4,11 +4,11 @@
 
 use alun_core::plugin::Plugin;
 use async_trait::async_trait;
-use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
+use rdkafka::producer::{FutureProducer, FutureRecord};
 use serde::Serialize;
-use tracing::{info, error};
 use std::time::Duration;
+use tracing::{error, info};
 
 /// Kafka 插件（实现 `alun_core::Plugin`，可注册到 PluginManager）
 ///
@@ -32,24 +32,37 @@ impl KafkaPlugin {
             .create::<FutureProducer>()
             .ok();
 
-        Self { brokers: brokers.into(), producer }
+        Self {
+            brokers: brokers.into(),
+            producer,
+        }
     }
 
     /// 获取 Kafka broker 地址
-    pub fn brokers(&self) -> &str { &self.brokers }
+    pub fn brokers(&self) -> &str {
+        &self.brokers
+    }
 
     /// 发送异步任务（任务数据自动序列化为 JSON）
-    pub async fn publish<T: Serialize>(&self, topic: &str, key: &str, payload: &T) -> alun_core::Result<()> {
+    pub async fn publish<T: Serialize>(
+        &self,
+        topic: &str,
+        key: &str,
+        payload: &T,
+    ) -> alun_core::Result<()> {
         if let Some(ref producer) = self.producer {
             let json = serde_json::to_string(payload)
                 .map_err(|e| alun_core::Error::Msg(format!("序列化失败: {}", e)))?;
-            producer.send(
-                FutureRecord::to(topic).key(key).payload(&json),
-                Duration::from_secs(5),
-            ).await.map_err(|(e, _)| {
-                error!("Kafka发送失败 topic={}: {}", topic, e);
-                alun_core::Error::Msg(format!("Kafka发送失败: {}", e))
-            })?;
+            producer
+                .send(
+                    FutureRecord::to(topic).key(key).payload(&json),
+                    Duration::from_secs(5),
+                )
+                .await
+                .map_err(|(e, _)| {
+                    error!("Kafka发送失败 topic={}: {}", topic, e);
+                    alun_core::Error::Msg(format!("Kafka发送失败: {}", e))
+                })?;
             info!("Kafka任务已发布 topic={} key={}", topic, key);
             Ok(())
         } else {
@@ -60,7 +73,9 @@ impl KafkaPlugin {
 
 #[async_trait]
 impl Plugin for KafkaPlugin {
-    fn name(&self) -> &str { "kafka" }
+    fn name(&self) -> &str {
+        "kafka"
+    }
 
     async fn start(&self) -> alun_core::Result<()> {
         if self.producer.is_some() {

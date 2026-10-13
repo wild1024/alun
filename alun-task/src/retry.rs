@@ -6,9 +6,9 @@ use tracing::{info, warn};
 
 use rdkafka::producer::{FutureProducer, FutureRecord};
 
+use crate::HandlerRegistry;
 use crate::storage::TaskStorage;
 use crate::types::*;
-use crate::HandlerRegistry;
 
 /// 重试扫描器
 ///
@@ -70,7 +70,8 @@ impl RetryScanner {
 
     /// 停止扫描循环
     pub fn stop(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.running
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 执行一轮扫描：将可重试任务重新推入 Kafka
@@ -142,17 +143,5 @@ impl RetryScanner {
             info!("本轮 RetryScanner 重试 {} 个任务", retried);
         }
         Ok(())
-    }
-}
-
-/// 计算重试延迟（秒）
-pub fn compute_retry_delay(strategy: &RetryStrategy, base: u64, max: u64, attempt: u32) -> u64 {
-    match strategy {
-        RetryStrategy::Fixed => base,
-        RetryStrategy::Linear => (base * (attempt + 1) as u64).min(max),
-        RetryStrategy::Exponential => {
-            let delay = base * 2u64.pow(attempt);
-            delay.min(max)
-        }
     }
 }

@@ -4,8 +4,8 @@
 
 #[cfg(test)]
 mod tests {
-    use alun_core::plugin::{Plugin, PluginManager};
     use alun_core::Result;
+    use alun_core::plugin::{Plugin, PluginManager};
     use async_trait::async_trait;
     use parking_lot::Mutex;
     use std::sync::Arc;
@@ -26,12 +26,17 @@ mod tests {
 
     #[async_trait]
     impl Plugin for OrderedPlugin {
-        fn name(&self) -> &str { self.name }
+        fn name(&self) -> &str {
+            self.name
+        }
 
         async fn start(&self) -> Result<()> {
             self.order_log.lock().push(format!("start:{}", self.name));
             if self.fail_start {
-                return Err(alun_core::Error::Msg(format!("插件 {} 启动失败", self.name)));
+                return Err(alun_core::Error::Msg(format!(
+                    "插件 {} 启动失败",
+                    self.name
+                )));
             }
             Ok(())
         }
@@ -39,12 +44,17 @@ mod tests {
         async fn stop(&self) -> Result<()> {
             self.order_log.lock().push(format!("stop:{}", self.name));
             if self.fail_stop {
-                return Err(alun_core::Error::Msg(format!("插件 {} 停止失败", self.name)));
+                return Err(alun_core::Error::Msg(format!(
+                    "插件 {} 停止失败",
+                    self.name
+                )));
             }
             Ok(())
         }
 
-        fn depends_on(&self) -> &[&str] { self.deps }
+        fn depends_on(&self) -> &[&str] {
+            self.deps
+        }
     }
 
     // ──── 基础启动 / 停止顺序 ──────────────────────
@@ -55,12 +65,18 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(OrderedPlugin {
-                name: "a", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "a",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "b", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "b",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             });
 
         mgr.start_all().await.unwrap();
@@ -81,16 +97,25 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(OrderedPlugin {
-                name: "db", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "db",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "cache", deps: &["db"], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "cache",
+                deps: &["db"],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "web", deps: &["db", "cache"], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "web",
+                deps: &["db", "cache"],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             });
 
         mgr.start_all().await.unwrap();
@@ -117,12 +142,18 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(OrderedPlugin {
-                name: "x", deps: &["y"], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "x",
+                deps: &["y"],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "y", deps: &["x"], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "y",
+                deps: &["x"],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             });
 
         let result = mgr.start_all().await;
@@ -139,16 +170,25 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(OrderedPlugin {
-                name: "healthy", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "healthy",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "broken", deps: &[], order_log: log.clone(),
-                fail_start: true, fail_stop: false,
+                name: "broken",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: true,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "never-started", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "never-started",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             });
 
         let result = mgr.start_all().await;
@@ -156,8 +196,10 @@ mod tests {
 
         let events = log.lock();
         assert!(events.iter().any(|e| e == "start:broken"));
-        assert!(!events.iter().any(|e| e == "start:never-started"),
-            "broken 之后的插件不应被启动");
+        assert!(
+            !events.iter().any(|e| e == "start:never-started"),
+            "broken 之后的插件不应被启动"
+        );
     }
 
     // ──── Stop 即使失败也继续 ─────────────────────
@@ -168,12 +210,18 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(OrderedPlugin {
-                name: "good", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "good",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "stubborn", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: true,
+                name: "stubborn",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: true,
             });
 
         mgr.start_all().await.unwrap();
@@ -181,8 +229,10 @@ mod tests {
 
         let events = log.lock();
         assert!(events.iter().any(|e| e == "stop:stubborn"));
-        assert!(events.iter().any(|e| e == "stop:good"),
-            "即使 stubborn 失败，good 也应被停止");
+        assert!(
+            events.iter().any(|e| e == "stop:good"),
+            "即使 stubborn 失败，good 也应被停止"
+        );
     }
 
     // ──── 重复名称检测 ──────────────────────────────
@@ -193,12 +243,18 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(OrderedPlugin {
-                name: "dup", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "dup",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "dup", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "dup",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             });
 
         let result = mgr.check_duplicate_names();
@@ -222,12 +278,13 @@ mod tests {
     async fn test_plugin_missing_dependency() {
         let log = Arc::new(Mutex::new(Vec::new()));
 
-        let mgr = PluginManager::new()
-            .add(OrderedPlugin {
-                name: "consumer", deps: &["non-existent-plugin"],
-                order_log: log.clone(),
-                fail_start: false, fail_stop: false,
-            });
+        let mgr = PluginManager::new().add(OrderedPlugin {
+            name: "consumer",
+            deps: &["non-existent-plugin"],
+            order_log: log.clone(),
+            fail_start: false,
+            fail_stop: false,
+        });
 
         let result = mgr.start_all().await;
         assert!(result.is_ok(), "缺失依赖不报错——依赖仅约束已注册插件");
@@ -241,16 +298,25 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(OrderedPlugin {
-                name: "base", deps: &[], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "base",
+                deps: &[],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "chain-a", deps: &["base"], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "chain-a",
+                deps: &["base"],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             })
             .add(OrderedPlugin {
-                name: "chain-b", deps: &["base"], order_log: log.clone(),
-                fail_start: false, fail_stop: false,
+                name: "chain-b",
+                deps: &["base"],
+                order_log: log.clone(),
+                fail_start: false,
+                fail_stop: false,
             });
 
         mgr.start_all().await.unwrap();
@@ -270,12 +336,13 @@ mod tests {
     async fn test_plugin_self_dependency() {
         let log = Arc::new(Mutex::new(Vec::new()));
 
-        let mgr = PluginManager::new()
-            .add(OrderedPlugin {
-                name: "self-dep", deps: &["self-dep"],
-                order_log: log.clone(),
-                fail_start: false, fail_stop: false,
-            });
+        let mgr = PluginManager::new().add(OrderedPlugin {
+            name: "self-dep",
+            deps: &["self-dep"],
+            order_log: log.clone(),
+            fail_start: false,
+            fail_stop: false,
+        });
 
         let result = mgr.start_all().await;
         assert!(result.is_err(), "自依赖应被检测为循环");

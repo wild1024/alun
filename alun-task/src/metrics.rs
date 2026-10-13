@@ -51,7 +51,9 @@ impl TaskMetrics {
 }
 
 impl Default for TaskMetrics {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// AtomicU64 原子递增扩展 trait

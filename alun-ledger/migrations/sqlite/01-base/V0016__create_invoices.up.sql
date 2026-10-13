@@ -1,0 +1,1 @@
+CREATE TABLE invoices (id INTEGER NOT NULL PRIMARY KEY, tenant_id INTEGER NOT NULL, customer_id INTEGER NOT NULL, status VARCHAR(16) NOT NULL, total TEXT NOT NULL, metadata TEXT, issued_at TEXT, paid_at TEXT, created_at TEXT NOT NULL)

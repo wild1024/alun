@@ -1,7 +1,7 @@
 //! Template engine abstraction — 运行时模板用 minijinja
 
-use std::sync::Arc;
 use alun_core::Result;
+use std::sync::Arc;
 
 /// 模板引擎（封装 minijinja，启动时一次性加载模板目录）
 #[derive(Clone)]
@@ -13,7 +13,9 @@ pub struct TemplateEngine {
 impl TemplateEngine {
     /// 创建空引擎（不加载任何模板，仅支持 `render_str`）
     pub fn new() -> Self {
-        Self { env: Arc::new(minijinja::Environment::new()) }
+        Self {
+            env: Arc::new(minijinja::Environment::new()),
+        }
     }
 
     /// 加载模板目录，模板通过文件名引用（如 "index.html", "dashboard.html"）
@@ -29,7 +31,8 @@ impl TemplateEngine {
     /// - `name`: 模板文件名（如 "index.html"），需先用 `from_dir` 加载目录
     /// - `ctx`: 模板上下文（任何实现 Serialize 的类型）
     pub fn render<C: serde::Serialize>(&self, name: &str, ctx: &C) -> Result<String> {
-        let tmpl = self.env
+        let tmpl = self
+            .env
             .get_template(name)
             .map_err(|e| alun_core::Error::Template(format!("模板加载失败 {}: {}", name, e)))?;
         let ctx_val = minijinja::value::Value::from_serialize(ctx);
@@ -39,7 +42,8 @@ impl TemplateEngine {
 
     /// 从字符串渲染（用于动态模板内容）
     pub fn render_str<C: serde::Serialize>(&self, source: &str, ctx: &C) -> Result<String> {
-        let tmpl = self.env
+        let tmpl = self
+            .env
             .template_from_str(source)
             .map_err(|e| alun_core::Error::Template(format!("模板编译失败: {}", e)))?;
         let ctx_val = minijinja::value::Value::from_serialize(ctx);
@@ -49,5 +53,7 @@ impl TemplateEngine {
 }
 
 impl Default for TemplateEngine {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

@@ -10,16 +10,12 @@
 //! 通过 [SecurityHeadersConfig] 按需开关各个 header，
 //! 或设置 `enabled = false` 关闭整个中间件。
 
-use axum::{
-    extract::Request,
-    response::Response,
-    body::Body,
-};
+use alun_config::SecurityHeadersConfig;
+use axum::{body::Body, extract::Request, response::Response};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
-use alun_config::SecurityHeadersConfig;
 
 /// 安全头中间件 —— 注入 HTTP 安全响应头
 #[derive(Clone)]
@@ -101,31 +97,28 @@ where
                 }
             }
 
-            if config.csp {
-                if let Ok(val) = axum::http::HeaderValue::from_str(&config.csp_value) {
-                    headers.insert(
-                        axum::http::HeaderName::from_static("content-security-policy"),
-                        val,
-                    );
-                }
+            if config.csp
+                && let Ok(val) = axum::http::HeaderValue::from_str(&config.csp_value)
+            {
+                headers.insert(
+                    axum::http::HeaderName::from_static("content-security-policy"),
+                    val,
+                );
             }
 
-            if config.referrer_policy {
-                if let Ok(val) = axum::http::HeaderValue::from_str(&config.referrer_policy_value) {
-                    headers.insert(
-                        axum::http::HeaderName::from_static("referrer-policy"),
-                        val,
-                    );
-                }
+            if config.referrer_policy
+                && let Ok(val) = axum::http::HeaderValue::from_str(&config.referrer_policy_value)
+            {
+                headers.insert(axum::http::HeaderName::from_static("referrer-policy"), val);
             }
 
-            if config.permissions_policy {
-                if let Ok(val) = axum::http::HeaderValue::from_str(&config.permissions_policy_value) {
-                    headers.insert(
-                        axum::http::HeaderName::from_static("permissions-policy"),
-                        val,
-                    );
-                }
+            if config.permissions_policy
+                && let Ok(val) = axum::http::HeaderValue::from_str(&config.permissions_policy_value)
+            {
+                headers.insert(
+                    axum::http::HeaderName::from_static("permissions-policy"),
+                    val,
+                );
             }
 
             Ok(resp)

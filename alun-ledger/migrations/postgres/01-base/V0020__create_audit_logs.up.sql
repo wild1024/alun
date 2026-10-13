@@ -1,0 +1,1 @@
+CREATE TABLE audit_logs (id BIGINT NOT NULL PRIMARY KEY, tenant_id BIGINT NOT NULL, entity_type VARCHAR(32) NOT NULL, entity_id BIGINT NOT NULL, action VARCHAR(32) NOT NULL, before_json JSONB, after_json JSONB, actor_id BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL)

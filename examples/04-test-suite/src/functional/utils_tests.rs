@@ -5,17 +5,16 @@
 #[cfg(test)]
 mod tests {
     use alun_utils::crypto::Crypto;
-    use alun_utils::sid::Sid;
-    use alun_utils::mask::Mask;
-    use alun_utils::valid::Valid;
     use alun_utils::date::Date;
+    use alun_utils::export::{Export, Import, XlsxSheet};
+    use alun_utils::mask::Mask;
+    use alun_utils::sid::Sid;
     use alun_utils::str::{
-        StrExt, sanitize_filename, parse_json_value, format_file_size,
-        clean_string_param, clean_email, clean_password,
-        InputCleaner, generate_invite_code, generate_random_digits,
-        generate_random_alphanum,
+        InputCleaner, StrExt, clean_email, clean_password, clean_string_param, format_file_size,
+        generate_invite_code, generate_random_alphanum, generate_random_digits, parse_json_value,
+        sanitize_filename,
     };
-    use alun_utils::export::{Export, Import};
+    use alun_utils::valid::Valid;
     use alun_utils::web::{WebExt, is_private_ip};
 
     // ──── Crypto ──────────────────────────────────────
@@ -146,8 +145,8 @@ mod tests {
     #[test]
     fn test_sid_uuid() {
         let id = Sid::uuid();
-        assert_eq!(id.len(), 32);
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(id.len(), 36);
+        assert_eq!(id.matches('-').count(), 4);
     }
 
     #[test]
@@ -174,8 +173,8 @@ mod tests {
     #[test]
     fn test_sid_uuid7() {
         let id = Sid::uuid7();
-        assert_eq!(id.len(), 32);
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(id.len(), 36);
+        assert_eq!(id.matches('-').count(), 4);
     }
 
     #[test]
@@ -262,7 +261,7 @@ mod tests {
     #[test]
     fn test_valid_url() {
         assert!(Valid::is_url("https://example.com"));
-        assert!(Valid::is_url("http://localhost:3000/api"));
+        assert!(Valid::is_url("http://example.com:3000/api"));
         assert!(!Valid::is_url("not-a-url"));
         assert!(!Valid::is_url(""));
     }
@@ -301,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_valid_strong_password() {
-        assert!(Valid::is_strong_password("Abcdefg1"));
+        assert!(Valid::is_strong_password("Abcdefg1!"));
         assert!(Valid::is_strong_password("MyP@ssw0rd"));
         assert!(!Valid::is_strong_password("short1A"));
         assert!(!Valid::is_strong_password("nouppercase1"));
@@ -495,11 +494,8 @@ mod tests {
 
     #[test]
     fn test_input_cleaner_register() {
-        let (email, password, nickname) = InputCleaner::clean_register_input(
-            " Alice@Mail.COM ",
-            " Pass123 ",
-            "  John  ",
-        );
+        let (email, password, nickname) =
+            InputCleaner::clean_register_input(" Alice@Mail.COM ", " Pass123 ", "  John  ");
         assert_eq!(email, "alice@mail.com");
         assert_eq!(password, "Pass123");
         assert_eq!(nickname, "John");
@@ -507,10 +503,8 @@ mod tests {
 
     #[test]
     fn test_input_cleaner_login() {
-        let (email, password) = InputCleaner::clean_login_input(
-            " BOB@Example.Com   ",
-            "   secret  ",
-        );
+        let (email, password) =
+            InputCleaner::clean_login_input(" BOB@Example.Com   ", "   secret  ");
         assert_eq!(email, "bob@example.com");
         assert_eq!(password, "secret");
     }
@@ -545,7 +539,10 @@ mod tests {
     fn test_generate_random_alphanum() {
         let s = generate_random_alphanum(8);
         assert_eq!(s.len(), 8);
-        assert!(!s.chars().any(|c| c == '0' || c == 'O' || c == 'I' || c == 'l'));
+        assert!(
+            !s.chars()
+                .any(|c| c == '0' || c == 'O' || c == 'I' || c == 'l')
+        );
     }
 
     #[test]
@@ -574,11 +571,20 @@ mod tests {
     #[test]
     fn test_export_to_json() {
         #[derive(serde::Serialize, PartialEq, Debug)]
-        struct Item { id: i64, name: String }
+        struct Item {
+            id: i64,
+            name: String,
+        }
 
         let items = vec![
-            Item { id: 1, name: "A".into() },
-            Item { id: 2, name: "B".into() },
+            Item {
+                id: 1,
+                name: "A".into(),
+            },
+            Item {
+                id: 2,
+                name: "B".into(),
+            },
         ];
         let json = Export::to_json(&items).unwrap();
         let result: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
@@ -588,14 +594,57 @@ mod tests {
     }
 
     #[test]
-    fn test_export_to_xlsx() {
+    fn test_export_to_csv_bytes() {
         let mut row = std::collections::HashMap::new();
         row.insert("id".into(), "1".into());
         row.insert("name".into(), "Test".into());
 
-        let data = Export::to_xlsx(&["id", "name"], &[row]).unwrap();
+        let data = Export::to_csv_bytes(&["id", "name"], &[row.clone()]).unwrap();
         assert_eq!(&data[..3], &[0xEFu8, 0xBB, 0xBF]); // BOM
         assert!(data.len() > 3);
+
+        // 产物是 CSV，不是 XLSX：不应以 zip 容器魔数开头
+        assert_ne!(&data[..2], b"PK");
+    }
+
+    #[test]
+    fn test_export_to_xlsx_real_workbook() {
+        let mut row = std::collections::HashMap::new();
+        row.insert("id".into(), "1".into());
+        row.insert("name".into(), "Test".into());
+
+        let bytes = Export::to_xlsx_bytes(&["id", "name"], &[row]).unwrap();
+        // .xlsx = OOXML = zip 包
+        assert_eq!(&bytes[..4], &[0x50, 0x4B, 0x03, 0x04]);
+        // 用解析器反读：证明第三方工具也能读，而不是「只有 Excel 忍得了」
+        let back = Import::from_xlsx(&bytes).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].get("id").unwrap(), "1");
+        assert_eq!(back[0].get("name").unwrap(), "Test");
+    }
+
+    #[test]
+    fn test_export_to_xlsx_multi_sheet() {
+        let mut a = std::collections::HashMap::new();
+        a.insert("id".into(), "1".into());
+        let mut b = std::collections::HashMap::new();
+        b.insert("id".into(), "9".into());
+        let users = [a];
+        let orders = [b];
+
+        let sheets = [
+            XlsxSheet::new("用户", &["id"], &users),
+            XlsxSheet::new("订单", &["id"], &orders),
+        ];
+        let bytes = Export::to_xlsx_workbook(&sheets).unwrap();
+        assert_eq!(
+            Import::xlsx_sheet_names(&bytes).unwrap(),
+            vec!["用户".to_string(), "订单".to_string()]
+        );
+        assert_eq!(
+            Import::from_xlsx_sheet(&bytes, "订单").unwrap()[0].get("id").unwrap(),
+            "9"
+        );
     }
 
     #[test]
@@ -612,12 +661,21 @@ mod tests {
     #[test]
     fn test_import_from_json() {
         #[derive(serde::Deserialize, PartialEq, Debug)]
-        struct Item { id: i64, name: String }
+        struct Item {
+            id: i64,
+            name: String,
+        }
 
         let json = r#"[{"id":1,"name":"A"},{"id":2,"name":"B"}]"#;
         let items: Vec<Item> = Import::from_json(json).unwrap();
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0], Item { id: 1, name: "A".into() });
+        assert_eq!(
+            items[0],
+            Item {
+                id: 1,
+                name: "A".into()
+            }
+        );
     }
 
     #[test]
@@ -630,14 +688,23 @@ mod tests {
 
     #[test]
     fn test_web_ext_domain() {
-        assert_eq!(WebExt::domain("https://example.com/path"), Some("example.com".into()));
-        assert_eq!(WebExt::domain("http://localhost:3000"), Some("localhost".into()));
+        assert_eq!(
+            WebExt::domain("https://example.com/path"),
+            Some("example.com".into())
+        );
+        assert_eq!(
+            WebExt::domain("http://localhost:3000"),
+            Some("localhost".into())
+        );
         assert_eq!(WebExt::domain("invalid"), None);
     }
 
     #[test]
     fn test_web_ext_path() {
-        assert_eq!(WebExt::path("https://example.com/api/users"), Some("/api/users".into()));
+        assert_eq!(
+            WebExt::path("https://example.com/api/users"),
+            Some("/api/users".into())
+        );
         assert_eq!(WebExt::path("https://example.com/"), Some("/".into()));
         assert_eq!(WebExt::path("invalid"), None);
     }

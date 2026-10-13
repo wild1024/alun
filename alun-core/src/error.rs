@@ -1,9 +1,15 @@
 use std::fmt;
 
-/// 框架统一错误类型
+/// 框架骨架层的统一错误类型
 ///
-/// 所有模块皆通过此类型返回错误，是 alun 生态的错误"语言"。
-/// 支持从 `std::io::Error`、`String`、`&str`、`ApiError` 自动转换。
+/// 启动流程、插件生命周期、任务调度等**非 HTTP 场景**通过此类型返回错误。
+/// 支持从 `std::io::Error`、`String`、`&str` 自动转换。
+///
+/// > **本类型不认识数据库，也不认识 HTTP**：
+/// > `DbError` 属于 `alun-db-core`，`ApiError` 属于 `alun-web`，而本 crate 与它们
+/// > **互不依赖**（硬约束，见 `alun-web/src/page.rs` 的说明）。HTTP 侧的收敛由
+/// > `alun-web` 承担——`ApiError` 是它的本地类型，`From<任意外部错误>` 都合法，
+/// > 因此业务端的 handler **只需要** `ResResult<T>` 与 `ApiError` 两个名字。
 ///
 /// # 示例
 ///
@@ -71,12 +77,6 @@ impl From<String> for Error {
 impl From<&str> for Error {
     fn from(s: &str) -> Self {
         Error::Msg(s.to_string())
-    }
-}
-
-impl From<crate::api::ApiError> for Error {
-    fn from(e: crate::api::ApiError) -> Self {
-        Error::Msg(e.msg)
     }
 }
 

@@ -1,0 +1,1 @@
+CREATE TABLE accounts (id BIGINT NOT NULL PRIMARY KEY, tenant_id BIGINT NOT NULL, code VARCHAR(32) NOT NULL, name VARCHAR(128) NOT NULL, kind VARCHAR(16) NOT NULL, balance NUMERIC(38, 10) NOT NULL, CONSTRAINT uq_accounts_tenant_code UNIQUE (tenant_id, code))

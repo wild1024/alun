@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use alun_config::ConfigManager;
 
-use crate::middleware::{TokenClaims, TokenType};
+use crate::middleware::{ClaimsBuilder, TokenClaims, TokenType};
 
 /// JWT 管理器 —— 提供 Token 的完整生命周期管理
 ///
@@ -62,8 +62,14 @@ impl JWT {
 
     /// 从 ConfigManager 和缓存创建
     #[cfg(feature = "cache")]
-    pub fn with_config_and_cache(config: Arc<ConfigManager>, cache: alun_cache::SharedCache) -> Self {
-        JWT { config, cache: Some(cache) }
+    pub fn with_config_and_cache(
+        config: Arc<ConfigManager>,
+        cache: alun_cache::SharedCache,
+    ) -> Self {
+        JWT {
+            config,
+            cache: Some(cache),
+        }
     }
 
     /// 读取 JWT 密钥
@@ -117,6 +123,10 @@ impl JWT {
     ///
     /// Refresh Token 仅包含用户 ID，不含角色和权限信息，
     /// 专用于换取新的 Access Token，过期时间通常更长。
+    ///
+    /// > 多租户等需要跨刷新保留自定义声明的场景，请改用
+    /// > [`JWT::issue_refresh`]，它会把 `ClaimsBuilder` 中的
+    /// > 自定义声明一并写入 Refresh Token。
     pub fn create_refresh_token(&self, user_id: &str) -> Result<String, String> {
         self.create_token(
             user_id,
@@ -128,12 +138,56 @@ impl JWT {
         )
     }
 
+    /// 签发携带**自定义声明**的 Access Token。
+    ///
+    /// 这是推荐的签发入口：`jti` / `exp` / `iat` 由框架按配置补齐，
+    /// 业务通过 [`ClaimsBuilder`] 声明角色、权限与任意自定义 claim
+    /// （如多租户的 `tenant_id`）。
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// let token = jwt.issue(
+    ///     ClaimsBuilder::new(user.id)
+    ///         .username(&user.name)
+    ///         .roles(&role_codes)
+    ///         .permissions(&perm_codes)
+    ///         .claim("tenant_id", serde_json::json!(tenant_id)),
+    /// )?;
+    /// ```
+    pub fn issue(&self, builder: ClaimsBuilder) -> Result<String, String> {
+        self.create_token_with(builder.build(TokenType::Access, self.access_token_expire_secs()))
+    }
+
+    /// 签发携带**自定义声明**的 Refresh Token。
+    ///
+    /// 与 [`JWT::issue`] 的区别仅在 `token_type` 与有效期。**多租户场景必须
+    /// 使用本方法**：否则刷新后新的 Access Token 会丢失 `tenant_id`，
+    /// 导致租户中间件取不到上下文而 fail-closed。
+    pub fn issue_refresh(&self, builder: ClaimsBuilder) -> Result<String, String> {
+        self.create_token_with(builder.build(TokenType::Refresh, self.refresh_token_expire_secs()))
+    }
+
+    /// 直接编码一份完整的 [`TokenClaims`]（`jti` / `exp` / `iat` 需已填好）。
+    ///
+    /// 供需要完全掌控载荷的场景使用；一般情况下用 [`JWT::issue`] 即可。
+    pub fn create_token_with(&self, claims: TokenClaims) -> Result<String, String> {
+        use jsonwebtoken::{EncodingKey, Header, encode};
+
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.jwt_secret().as_bytes()),
+        )
+        .map_err(|e| format!("Token 生成失败: {}", e))
+    }
+
     /// 验证 JWT Token 并返回声明
     ///
     /// 解析 Token 的签名和有效期，返回包含用户信息的 [TokenClaims]。
     /// 注意：此方法不检查黑名单，黑名单检查需额外调用 [is_blacklisted]。
     pub fn validate(&self, token: &str) -> Result<TokenClaims, String> {
-        use jsonwebtoken::{decode, DecodingKey, Validation};
+        use jsonwebtoken::{DecodingKey, Validation, decode};
 
         let token_data = decode::<TokenClaims>(
             token,
@@ -151,7 +205,7 @@ impl JWT {
     /// 若缓存层未初始化，则静默跳过。
     #[cfg(feature = "cache")]
     pub async fn blacklist(&self, claims: &TokenClaims) {
-        if let (Some(ref cache), Some(ref jti)) = (&self.cache, &claims.jti) {
+        if let (Some(cache), Some(jti)) = (&self.cache, &claims.jti) {
             let now_secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as usize)
@@ -162,7 +216,8 @@ impl JWT {
                 60
             };
             let key = format!("token:blacklist:{}", jti);
-            let _ = alun_cache::Cache::set_ex(cache, &key, &serde_json::json!(true), ttl as u64).await;
+            let _ =
+                alun_cache::Cache::set_ex(cache, &key, &serde_json::json!(true), ttl as u64).await;
         }
     }
 
@@ -171,12 +226,12 @@ impl JWT {
     /// 若缓存层未初始化或 Token 无 jti，则返回 `false`。
     #[cfg(feature = "cache")]
     pub async fn is_blacklisted(&self, claims: &TokenClaims) -> bool {
-        if let (Some(ref cache), Some(ref jti)) = (&self.cache, &claims.jti) {
+        if let (Some(cache), Some(jti)) = (&self.cache, &claims.jti) {
             let key = format!("token:blacklist:{}", jti);
-            match alun_cache::Cache::get::<serde_json::Value>(cache, &key).await {
-                Ok(Some(_)) => true,
-                _ => false,
-            }
+            matches!(
+                alun_cache::Cache::get::<serde_json::Value>(cache, &key).await,
+                Ok(Some(_))
+            )
         } else {
             false
         }
@@ -202,10 +257,7 @@ impl JWT {
     ///
     /// 成功返回 `(新AccessToken, 新RefreshToken)`。
     #[cfg(feature = "cache")]
-    pub async fn refresh(
-        &self,
-        refresh_token_str: &str,
-    ) -> Result<(String, String), String> {
+    pub async fn refresh(&self, refresh_token_str: &str) -> Result<(String, String), String> {
         let claims = self.validate(refresh_token_str)?;
 
         if claims.token_type != Some(TokenType::Refresh) {
@@ -218,14 +270,27 @@ impl JWT {
 
         self.blacklist(&claims).await;
 
-        let access_token = self.create_access_token(
-            &claims.sub,
-            claims.username.as_deref(),
-            &claims.roles,
-            &claims.permissions,
-        )?;
+        // 自定义声明（如 `tenant_id`）经此**原样延续**到新 Token：
+        // 否则刷新后 Access Token 会丢失租户上下文，下游 fail-closed。
+        let rebuild = || {
+            let mut builder = ClaimsBuilder::new(claims.sub.clone())
+                .roles(&claims.roles)
+                .permissions(&claims.permissions)
+                .claims(
+                    claims
+                        .extra
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect::<Vec<_>>(),
+                );
+            if let Some(name) = claims.username.as_deref() {
+                builder = builder.username(name);
+            }
+            builder
+        };
 
-        let new_refresh_token = self.create_refresh_token(&claims.sub)?;
+        let access_token = self.issue(rebuild())?;
+        let new_refresh_token = self.issue_refresh(rebuild())?;
 
         Ok((access_token, new_refresh_token))
     }
@@ -239,31 +304,13 @@ impl JWT {
         token_type: TokenType,
         expire_secs: u64,
     ) -> Result<String, String> {
-        use jsonwebtoken::{encode, EncodingKey, Header};
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| format!("时间戳错误: {}", e))?
-            .as_secs() as usize;
-
-        let claims = TokenClaims {
-            jti: Some(uuid::Uuid::new_v4().to_string()),
-            sub: user_id.to_string(),
-            username: username.map(|s| s.to_string()),
-            roles: roles.to_vec(),
-            permissions: permissions.to_vec(),
-            token_type: Some(token_type),
-            exp: now + expire_secs as usize,
-            iat: now,
-        };
-
-        encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(self.jwt_secret().as_bytes()),
-        )
-        .map_err(|e| format!("Token 生成失败: {}", e))
+        let mut builder = ClaimsBuilder::new(user_id)
+            .roles(roles)
+            .permissions(permissions);
+        if let Some(name) = username {
+            builder = builder.username(name);
+        }
+        self.create_token_with(builder.build(token_type, expire_secs))
     }
 }
 

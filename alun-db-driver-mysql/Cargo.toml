@@ -1,0 +1,11 @@
+[package]
+name = "alun-db-driver-mysql"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+alun-db-core = { version = "0.3.0", path = "../alun-db-core" }
+alun-db-sql = { version = "0.3.0", path = "../alun-db-sql" }
+tokio = { version = "1.53", features = ["rt", "sync", "time"] }
+# minimal = 无 derive / TLS：按需最小特性，避免生态版本冲突
+mysql_async = { version = "0.37.1", default-features = false, features = ["minimal"] }

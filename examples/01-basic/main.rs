@@ -2,8 +2,8 @@
 //!
 //! 启动一个 Web 服务，配置完全由 config.toml 驱动。
 
-use alun::{App, Res};
 use alun::prelude::*;
+use alun::{App, Res};
 
 #[alun::get("/")]
 async fn hello() -> Res<String> {

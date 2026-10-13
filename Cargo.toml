@@ -1,10 +1,17 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "alun-core",
     "alun-macros",
     "alun-web",
     "alun-db",
+    "alun-db-core",
+    "alun-db-sql",
+    "alun-db-macro",
+    "alun-db-build",
+    "alun-db-driver-sqlite",
+    "alun-db-driver-postgres",
+    "alun-db-driver-mysql",
     "alun-template",
     "alun-cache",
     "alun-config",
@@ -15,62 +22,109 @@ members = [
     "alun-task",
     "alun-fs",
     "alun",
+    "alun-ledger",
+    "examples/00-quick-start",
+    "examples/01-basic",
+    "examples/02-auth",
+    "examples/03-db-crud",
+    "examples/04-test-suite",
+    "docs-tests",
 ]
 exclude = [
-    "examples/*",
     "target/*",
 ]
 
 [workspace.package]
-version = "0.1.0"
-edition = "2021"
+version = "0.3.0"
+edition = "2024"
 license = "Apache-2.0"
 authors = ["alun contributors"]
 repository = "https://github.com/wild1024/alun"
 homepage = "https://github.com/wild1024/alun"
 documentation = "https://docs.rs/alun"
 readme = "README.md"
-rust-version = "1.74"
+rust-version = "1.94.1"
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.53", features = ["full"] }
 axum = "0.8"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "limit", "fs"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql", "sqlite", "chrono", "json", "uuid", "bigdecimal", "tls-rustls"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-anyhow = "1"
-thiserror = "2"
-async-trait = "0.1"
-minijinja = "2"
-askama = "0.12"
-inventory = "0.3"
-linkme = "0.3"
-parking_lot = "0.12"
-dashmap = "6"
-bytes = "1"
-http = "1"
-redis = { version = "0.29", features = ["tokio-comp", "connection-manager"] }
-validator = { version = "0.20", features = ["derive"] }
-rdkafka = "0.36"
-jsonwebtoken = "9"
-bcrypt = "0.16"
-uuid = { version = "1", features = ["v4", "v7"] }
-chrono = { version = "0.4", features = ["serde"] }
+tower-http = { version = "0.7", features = ["cors", "trace", "compression-gzip", "limit", "fs"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+anyhow = "1.0.104"
+thiserror = "2.0.20"
+async-trait = "0.1.92"
+minijinja = "2.24"
+askama = "0.16"
+inventory = "0.3.24"
+parking_lot = "0.12.5"
+dashmap = "6.2"
+bytes = "1.12"
+http = "1.5"
+redis = { version = "1.7", features = ["tokio-comp", "connection-manager"] }
+validator = { version = "0.21", features = ["derive"] }
+rdkafka = "0.39"
+jsonwebtoken = { version = "11.1", features = ["rust_crypto"] }
+bcrypt = "0.19"
+uuid = { version = "1.26", features = ["v4", "v7"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# 可观测性（F10）：`metrics` 是**埋点门面**（无 recorder 时零成本 no-op）；
+# `metrics-exporter-prometheus` 仅用于导出端点，默认关掉其内置的 HTTP 监听器
+# （框架把 `/metrics` 挂在主路由上，不额外占端口）。
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
 
-alun-core = { version = "0.1.1", path = "alun-core" }
-alun-macros = { version = "0.1.0", path = "alun-macros" }
-alun-web = { version = "0.1.6", path = "alun-web" }
-alun-db = { version = "0.1.4", path = "alun-db" }
-alun-template = { version = "0.1.0", path = "alun-template" }
-alun-cache = { version = "0.1.1", path = "alun-cache" }
-alun-config = { version = "0.1.2", path = "alun-config" }
-alun-log = { version = "0.1.1", path = "alun-log" }
-alun-utils = { version = "0.1.3", path = "alun-utils" }
-alun-plugin = { version = "0.1.1", path = "alun-plugin" }
-alun-kafka = { version = "0.1.1", path = "alun-kafka" }
-alun-task = { version = "0.1.1", path = "alun-task" }
-alun-fs = { version = "0.1.2", path = "alun-fs" }
+# 真 XLSX（F9）：写用 `rust_xlsxwriter`（纯 Rust OOXML，无 ziplib 系统依赖），
+# 读用 `calamine`（xlsx/xlsb/xls/ods 解析）。两者都不是默认依赖——只在
+# `xlsx` feature 下按需编译，避免为「可能导出 Excel」的框架使用者拉入 zip/xml 栈。
+rust_xlsxwriter = "0.99"
+calamine = "0.36"
+
+# 必须同时声明 `version`：发布到 crates.io 时 path 依赖会被剥离，
+# 只剩 version 参与解析；仅写 `path` 会导致 `cargo publish` 报错。
+#
+# `default-features = false` 是成员继承的前提：cargo 只允许成员在**工作区已声明
+# 关闭默认特性**时再写 `default-features = false`，否则报
+# “`default-features = false` cannot override workspace's `default-features`”。
+alun-core = { version = "0.3.0", path = "alun-core" }
+alun-macros = { version = "0.3.0", path = "alun-macros" }
+alun-web = { version = "0.3.0", path = "alun-web" }
+alun-db = { version = "0.3.0", path = "alun-db", default-features = false }
+alun-db-core = { version = "0.3.0", path = "alun-db-core" }
+alun-db-sql = { version = "0.3.0", path = "alun-db-sql" }
+alun-db-macro = { version = "0.3.0", path = "alun-db-macro" }
+alun-db-build = { version = "0.3.0", path = "alun-db-build" }
+alun-db-driver-sqlite = { version = "0.3.0", path = "alun-db-driver-sqlite" }
+alun-db-driver-postgres = { version = "0.3.0", path = "alun-db-driver-postgres" }
+alun-db-driver-mysql = { version = "0.3.0", path = "alun-db-driver-mysql" }
+alun-template = { version = "0.3.0", path = "alun-template" }
+alun-cache = { version = "0.3.0", path = "alun-cache" }
+alun-config = { version = "0.3.0", path = "alun-config" }
+alun-log = { version = "0.3.0", path = "alun-log" }
+alun-utils = { version = "0.3.0", path = "alun-utils" }
+alun-plugin = { version = "0.3.0", path = "alun-plugin" }
+alun-kafka = { version = "0.3.0", path = "alun-kafka" }
+alun-task = { version = "0.3.0", path = "alun-task", default-features = false }
+alun-fs = { version = "0.3.0", path = "alun-fs", default-features = false }
+
+# ── 构建提速：测试与依赖不带完整 debuginfo ──
+#
+# 本仓有 ~100 个 test target（`alun-db/tests` 28 个、`alun-ledger/tests` 15 个、
+# 各 crate 的 lib/bin unittest、doctest 包）。`cargo test` 会为**每个** target
+# 走一遍 rustc + 链接，带完整 debuginfo 时这三步是主要耗时（实测：测试执行本身
+# 合计仅 ~30s，链接/编译占绝大部分）。
+#
+# 关掉 debuginfo 后本地与 CI 的测试构建显著变快；需要调试测试时临时恢复：
+#   CARGO_PROFILE_TEST_DEBUG=2 cargo test ...
+#
+# 注：`package."*"` 只作用于**外部依赖**（rdkafka / libsqlite3-sys / ring /
+# aws-sdk 等），本工作区成员的调试信息不受影响。
+[profile.test]
+debug = 0
+
+[profile.dev.package."*"]
+debug = false

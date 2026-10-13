@@ -1,0 +1,1037 @@
+{
+  "version": "1",
+  "generated_at": "2026-10-06",
+  "repo": "alun-new",
+  "convention": "引用文档请用稳定 id（如 guides.database#多租户三通道），不要引用行号；详情见 AGENTS.md。",
+  "entries": [
+    {
+      "id": "architecture.aifei-tribute",
+      "path": "docs/architecture/aifei-tribute.md",
+      "title": "致敬 Aifei — 设计理念的 Rust 表达",
+      "summary": "Alun 承接 Aifei（世界首个 AI Coding 框架，官网 aifei.cn）的 Just Service 范式，在 Rust 生态称 Just Config；含 9 项设计逐项映射、Rust 侧增益与性能体量对比。",
+      "tags": [
+        "aifei",
+        "tribute",
+        "architecture",
+        "design",
+        "ai-coding"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "architecture.overview"
+      ],
+      "tokens": 1065
+    },
+    {
+      "id": "readme",
+      "path": "README.md",
+      "title": "项目 README（人类入口）",
+      "summary": "面向人类：alun 是什么、为什么为 AI Coding 而生、一分钟跑起来、能力总览与文档地图。",
+      "tags": [
+        "readme",
+        "intro"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [],
+      "tokens": 7846
+    },
+    {
+      "id": "agents",
+      "path": "AGENTS.md",
+      "title": "AGENTS.md（AI 检索/引用/更新规范）",
+      "summary": "面向 AI：如何检索、引用、更新文档；稳定 id 引用规则；变更走 ADR+CHANGELOG+migration。",
+      "tags": [
+        "agents",
+        "ai",
+        "contributing"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "docs.index"
+      ],
+      "tokens": 1580
+    },
+    {
+      "id": "docs.index",
+      "path": "docs/index.md",
+      "title": "文档总索引（Documentation Index）",
+      "summary": "人类可读目录，按 guides/reference/architecture/migrations 组织，含按场景找文档表。",
+      "tags": [
+        "index",
+        "toc"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [],
+      "tokens": 1787
+    },
+    {
+      "id": "guides.getting-started",
+      "path": "docs/guides/getting-started.md",
+      "title": "从零到跑起来（总目录）",
+      "summary": "alun 入门总入口：按 8 步流程拆成 8 个分册（环境/配置/接口/中间件/钩子插件/自定义配置 + 配置参考 + 安全模型），按需查阅不必通读。",
+      "tags": [
+        "getting-started",
+        "index",
+        "toc"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "architecture.overview"
+      ],
+      "tokens": 969
+    },
+    {
+      "id": "guides.startup.setup",
+      "path": "docs/guides/startup/setup.md",
+      "title": "准备环境与引入依赖",
+      "summary": "Rust 版本要求、项目初始化、把 alun 加进 Cargo.toml 并选择 feature 组合。",
+      "tags": [
+        "getting-started",
+        "setup",
+        "cargo",
+        "features"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 1501
+    },
+    {
+      "id": "guides.startup.config-basics",
+      "path": "docs/guides/startup/config-basics.md",
+      "title": "写配置与启动应用",
+      "summary": "config/config.toml 怎么写、三种启动方式怎么选、启动时到底发生了什么（排查按顺序看日志）。",
+      "tags": [
+        "getting-started",
+        "config",
+        "startup",
+        "app"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 2096
+    },
+    {
+      "id": "guides.startup.first-endpoint",
+      "path": "docs/guides/startup/first-endpoint.md",
+      "title": "接数据库与写第一个接口",
+      "summary": "接入数据库的最小配置，以及第一个路由 + 统一响应 Res<T> + 错误直通的写法。",
+      "tags": [
+        "getting-started",
+        "database",
+        "routing",
+        "response"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 2848
+    },
+    {
+      "id": "guides.startup.middleware",
+      "path": "docs/guides/startup/middleware.md",
+      "title": "按需装配：中间件",
+      "summary": "先看配置能解决多少、还需要什么中间件、自定义中间件怎么写与挂载。",
+      "tags": [
+        "getting-started",
+        "middleware",
+        "assembly"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 1189
+    },
+    {
+      "id": "guides.startup.hooks-plugins",
+      "path": "docs/guides/startup/hooks-plugins.md",
+      "title": "按需装配：启动钩子与插件",
+      "summary": "on_startup 什么时候用、插件什么时候值得写、三者关系总结。",
+      "tags": [
+        "getting-started",
+        "hooks",
+        "plugin",
+        "assembly"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 1560
+    },
+    {
+      "id": "guides.startup.custom-config",
+      "path": "docs/guides/startup/custom-config.md",
+      "title": "自定义配置与常见问题",
+      "summary": "[custom] 配置段怎么写怎么读、类型安全封装、FAQ 与下一步。",
+      "tags": [
+        "getting-started",
+        "custom-config",
+        "faq"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 1601
+    },
+    {
+      "id": "guides.startup.config-reference",
+      "path": "docs/guides/startup/config-reference.md",
+      "title": "附录：配置全字段参考",
+      "summary": "config.toml 全部字段的默认值、取值与作用，按 server/log/database/redis/cache/middleware/tenant 分组。",
+      "tags": [
+        "getting-started",
+        "config",
+        "reference",
+        "cheatsheet"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 1876
+    },
+    {
+      "id": "guides.startup.security-model",
+      "path": "docs/guides/startup/security-model.md",
+      "title": "附录：认证、鉴权与多租户隔离安全模型",
+      "summary": "一句话模型、三条 fail-closed 底线、ClaimsBuilder 签发与 extra 访问、TokenClaims 缓存命名空间、安全自检清单。",
+      "tags": [
+        "getting-started",
+        "auth",
+        "jwt",
+        "multi-tenant",
+        "fail-closed",
+        "security"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 1040
+    },
+    {
+      "id": "guides.database",
+      "path": "docs/guides/database.md",
+      "title": "数据库指南（总目录）",
+      "summary": "alun-db 数据库指南总入口：按主题拆成 7 个分册（入门/建模/CRUD/查询技巧/运维/多租户/附录），按需查阅不必通读。",
+      "tags": [
+        "database",
+        "index",
+        "toc"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "reference.crates",
+        "migrations.v0.3.0-breaking"
+      ],
+      "tokens": 772
+    },
+    {
+      "id": "guides.fullstack",
+      "path": "docs/guides/fullstack.md",
+      "title": "全栈技术选型（Fullstack Tech Stack）",
+      "summary": "前端栈、模板、实时推送、导出导入、可观测等全栈能力选型与组合建议。",
+      "tags": [
+        "fullstack",
+        "frontend",
+        "template",
+        "realtime"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 9562
+    },
+    {
+      "id": "guides.recommended-architecture",
+      "path": "docs/guides/recommended-architecture.md",
+      "title": "Alun 框架推荐项目架构",
+      "summary": "基于 alun 的业务项目推荐目录结构与垂直切割（modules）方式。",
+      "tags": [
+        "architecture",
+        "project-layout",
+        "modules"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "architecture.overview"
+      ],
+      "tokens": 1350
+    },
+    {
+      "id": "guides.db.getting-started",
+      "path": "docs/guides/db/getting-started.md",
+      "title": "数据库入门：五分钟跑通 + 让数据库连上",
+      "summary": "加依赖、配库（配置驱动 / 代码初始化两种方式）、db() 与 try_db() 的区别；5 分钟跑通第一个接口。",
+      "tags": [
+        "database",
+        "getting-started",
+        "config",
+        "connect"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 3200
+    },
+    {
+      "id": "guides.db.modeling",
+      "path": "docs/guides/db/modeling.md",
+      "title": "定义模型（Model derive 与属性速查）",
+      "summary": "最小模型、属性速查（除 #[view] 外全部可选）、新手常见提问。",
+      "tags": [
+        "database",
+        "model",
+        "derive",
+        "schema"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 1003
+    },
+    {
+      "id": "guides.db.crud",
+      "path": "docs/guides/db/crud.md",
+      "title": "六件最常用的事（照着抄）",
+      "summary": "查一条 / 查一批 / 新增 / 改 / 删 / 分页 / 计数，覆盖 90% 日常需求。",
+      "tags": [
+        "database",
+        "crud",
+        "query",
+        "pagination"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 3902
+    },
+    {
+      "id": "guides.db.recipes",
+      "path": "docs/guides/db/recipes.md",
+      "title": "按需求查技巧：查询与数据操作",
+      "summary": "搜索条件可有可无、联表聚合与窗口函数、一个操作动多张表、批量导入 / 存在就更新、表名运行时才知道。",
+      "tags": [
+        "database",
+        "recipes",
+        "join",
+        "batch",
+        "upsert"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 2694
+    },
+    {
+      "id": "guides.db.ops",
+      "path": "docs/guides/db/ops.md",
+      "title": "按需求查技巧：视图、Hook、迁移、多库与错误映射",
+      "summary": "只读视图（#[view]）、同步 Hook 与提交后触发的 AsyncHook、Migrator 迁移引擎（约定/校验/存量库接入）、多方言可移植写法、DbError→ApiError 自动映射规则与手写 map_err 的边界、16 条踩坑清单。",
+      "tags": [
+        "database",
+        "migration",
+        "hook",
+        "view",
+        "error-mapping",
+        "pitfalls"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 2260
+    },
+    {
+      "id": "guides.db.multi-tenant",
+      "path": "docs/guides/db/multi-tenant.md",
+      "title": "多租户：与普通操作逐项对照",
+      "summary": "绝大多数操作一行都不用改（附实际生成的 SQL 对比）；原生 SQL/定时任务/超管三种必须动手的情况各附错误与正确写法；fail-closed 真实报错文案与两个安全指标；行级 vs schema-per-tenant 选型对比。",
+      "tags": [
+        "database",
+        "multi-tenant",
+        "isolation",
+        "fail-closed",
+        "saas"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 3399
+    },
+    {
+      "id": "guides.db.appendix",
+      "path": "docs/guides/db/appendix.md",
+      "title": "附录：API 速查、反模式清单、已删除 API",
+      "summary": "按类型分组的 API 签名速查、反模式清单、本次重构已删除或改名的 API。",
+      "tags": [
+        "database",
+        "api",
+        "cheatsheet",
+        "antipattern"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 2798
+    },
+    {
+      "id": "architecture.overview",
+      "path": "docs/architecture/overview.md",
+      "title": "架构与分层总览（Architecture Overview）",
+      "summary": "配置驱动+插件架构、分层、设计理念、与 Java 系框架差异、feature 预设（mini⊂lite⊂full）。",
+      "tags": [
+        "architecture",
+        "design",
+        "layering",
+        "feature"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [],
+      "tokens": 2701
+    },
+    {
+      "id": "reference.crates",
+      "path": "docs/reference/crates.md",
+      "title": "Crate 级 API 参考（索引）",
+      "summary": "21 个 workspace crate 的分层全景与模块索引；每个 crate 的详细 API 在 docs/reference/crates/ 下有独立文件。",
+      "tags": [
+        "reference",
+        "crates",
+        "api",
+        "features",
+        "index"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.dependencies"
+      ],
+      "tokens": 2866
+    },
+    {
+      "id": "reference.crates.core",
+      "path": "docs/reference/crates/core.md",
+      "title": "`alun-core` — 核心抽象层",
+      "summary": "错误类型 Error、插件协议 Plugin/PluginManager；响应体与分页类型已迁出到 alun-web。",
+      "tags": [
+        "core",
+        "error",
+        "plugin"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 1641
+    },
+    {
+      "id": "reference.crates.facade",
+      "path": "docs/reference/crates/facade.md",
+      "title": "`alun` — 门面 Crate（prelude / feature / re-export）",
+      "summary": "alun::prelude 全部导出、feature 开关矩阵、过程宏导出与顶层 re-export 对照表。",
+      "tags": [
+        "facade",
+        "prelude",
+        "features"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 3352
+    },
+    {
+      "id": "reference.crates.web",
+      "path": "docs/reference/crates/web.md",
+      "title": "`alun-web` — Web 核心层",
+      "summary": "App 构建器、AlunRouter、resources 访问器、JWT/TokenClaims、提取器与校验、Res/ApiError、中间件与分布式切片。",
+      "tags": [
+        "web",
+        "routing",
+        "middleware",
+        "jwt"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 8197
+    },
+    {
+      "id": "reference.crates.db",
+      "path": "docs/reference/crates/db.md",
+      "title": "`alun-db` — 数据库门面",
+      "summary": "Db/Row/Transaction、Migrator 迁移、Model/Hook/CrudExt/ModelQuery/ChangeSet/PersistExt、Builder 体系与 sql! 宏。",
+      "tags": [
+        "db",
+        "sql",
+        "orm",
+        "migration",
+        "transaction"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 10555
+    },
+    {
+      "id": "reference.crates.config",
+      "path": "docs/reference/crates/config.md",
+      "title": "`alun-config` — 配置系统",
+      "summary": "AppConfig/ConfigManager、配置子结构体、环境变量覆盖与 profile 机制。",
+      "tags": [
+        "config",
+        "toml",
+        "env"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 2412
+    },
+    {
+      "id": "reference.crates.cache",
+      "path": "docs/reference/crates/cache.md",
+      "title": "`alun-cache` — 缓存系统",
+      "summary": "Cache trait、Local/Redis/Shared 实现、CacheStats 与工厂函数。",
+      "tags": [
+        "cache",
+        "redis"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 1207
+    },
+    {
+      "id": "reference.crates.template",
+      "path": "docs/reference/crates/template.md",
+      "title": "`alun-template` — 模板引擎",
+      "summary": "TemplateEngine 封装与渲染入口。",
+      "tags": [
+        "template",
+        "minijinja"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 594
+    },
+    {
+      "id": "reference.crates.utils",
+      "path": "docs/reference/crates/utils.md",
+      "title": "`alun-utils` — 工具集",
+      "summary": "str/date/mask/sid/ua/valid/crypto/serial/web/export/xss 各子模块速查。",
+      "tags": [
+        "utils",
+        "str",
+        "date",
+        "crypto",
+        "export"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 6996
+    },
+    {
+      "id": "reference.crates.macros",
+      "path": "docs/reference/crates/macros.md",
+      "title": "`alun-macros` — Proc Macro",
+      "summary": "route.rs 路由宏、plugin.rs 插件标记、task_handler.rs 任务处理器宏。",
+      "tags": [
+        "macros",
+        "proc-macro"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 814
+    },
+    {
+      "id": "reference.crates.plugin",
+      "path": "docs/reference/crates/plugin.md",
+      "title": "`alun-plugin` — 内置插件",
+      "summary": "cache/notification/async-task/scheduler/serial/sid 六类内置插件与 create_plugins_from_config。",
+      "tags": [
+        "plugin",
+        "scheduler",
+        "serial",
+        "sid"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 2210
+    },
+    {
+      "id": "reference.crates.log",
+      "path": "docs/reference/crates/log.md",
+      "title": "`alun-log` — 日志初始化",
+      "summary": "基于 tracing 的日志初始化与配置联动。",
+      "tags": [
+        "log",
+        "tracing"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 570
+    },
+    {
+      "id": "reference.crates.kafka",
+      "path": "docs/reference/crates/kafka.md",
+      "title": "`alun-kafka` — Kafka 生产者/消费者",
+      "summary": "生产者、消费者与 Kafka 插件的公开 API。",
+      "tags": [
+        "kafka",
+        "rdkafka"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 596
+    },
+    {
+      "id": "reference.crates.fs",
+      "path": "docs/reference/crates/fs.md",
+      "title": "`alun-fs` — 多后端文件存储",
+      "summary": "local 与 MinIO 后端的文件存储 API。",
+      "tags": [
+        "fs",
+        "minio",
+        "storage"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 1926
+    },
+    {
+      "id": "reference.crates.task",
+      "path": "docs/reference/crates/task.md",
+      "title": "`alun-task` — 异步任务框架",
+      "summary": "TaskStorage/TaskHandler/HandlerRegistry/TaskProducer/TaskWorker、RetryScanner、枚举配置与 task_handler 宏。",
+      "tags": [
+        "task",
+        "kafka",
+        "retry",
+        "dlq"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 6584
+    },
+    {
+      "id": "reference.crates.db-family",
+      "path": "docs/reference/crates/db-family.md",
+      "title": "`alun-db` 家族其余 Crate（core/sql/macro/build/驱动）",
+      "summary": "alun-db-core 纯类型与 trait、alun-db-sql 方言渲染、alun-db-macro derive 与 sql!、alun-db-build、三个 driver。",
+      "tags": [
+        "db",
+        "driver",
+        "dialect",
+        "derive"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 2768
+    },
+    {
+      "id": "reference.crates.observability",
+      "path": "docs/reference/crates/observability.md",
+      "title": "可观测 · 实时推送 · 导出导入 · 扩展点",
+      "summary": "metrics/Prometheus、SSE 实时推送、WebPlugin 扩展点、命名数据源、排序白名单与结构化联查、xlsx 导出导入。",
+      "tags": [
+        "observability",
+        "sse",
+        "metrics",
+        "xlsx",
+        "extension"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 2406
+    },
+    {
+      "id": "reference.dependencies",
+      "path": "docs/reference/dependencies.md",
+      "title": "依赖与版本基线（Dependencies）",
+      "summary": "编译基线（edition 2024 / MSRV 1.94.1）、关键第三方依赖与版本约束。",
+      "tags": [
+        "reference",
+        "dependencies",
+        "msrv"
+      ],
+      "status": "active",
+      "source_of_truth": "code",
+      "depends_on": [],
+      "tokens": 5842
+    },
+    {
+      "id": "migrations.v0.3.0-breaking",
+      "path": "docs/migrations/v0.3.0-breaking.md",
+      "title": "v0.3.0 破坏性变更与升级指南",
+      "summary": "B1–B10 破坏性变更总表、迁移对照、F1–F20 落地状态、关键安全修复、feature 分层、验证矩阵。",
+      "tags": [
+        "migration",
+        "breaking-change",
+        "v0.3.0",
+        "upgrade"
+      ],
+      "status": "active",
+      "source_of_truth": "decision",
+      "depends_on": [
+        "architecture.overview",
+        "guides.database"
+      ],
+      "tokens": 3187
+    },
+    {
+      "id": "glossary",
+      "path": "docs/glossary.md",
+      "title": "术语表（Glossary）",
+      "summary": "核心术语与同义词统一表（ResResult/ApiError/ChangeSet/ModelQuery/TenantContext/fail-closed 等）。",
+      "tags": [
+        "glossary",
+        "terms",
+        "conventions"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "architecture.overview"
+      ],
+      "tokens": 828
+    },
+    {
+      "id": "changelog",
+      "path": "CHANGELOG.md",
+      "title": "全局版本变更日志（Changelog）",
+      "summary": "Keep a Changelog 风格；0.3.0 破坏性变更/新增/安全修复摘要，链接迁移指南与 ADR。",
+      "tags": [
+        "changelog",
+        "versioning"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "migrations.v0.3.0-breaking"
+      ],
+      "tokens": 620
+    },
+    {
+      "id": "architecture.adr.inventory",
+      "path": "docs/architecture/adr/ADR-0001-inventory-over-linkme.md",
+      "title": "ADR-0001 inventory 取代 linkme",
+      "summary": "路由注册由 linkme 切 inventory，并提供 #[alun::routes]/App::module() 双通道的决策与后果。",
+      "tags": [
+        "adr",
+        "routing",
+        "inventory"
+      ],
+      "status": "accepted",
+      "source_of_truth": "decision",
+      "depends_on": [
+        "architecture.overview"
+      ],
+      "tokens": 534
+    },
+    {
+      "id": "architecture.adr.fail-closed",
+      "path": "docs/architecture/adr/ADR-0002-fail-closed-tenant-isolation.md",
+      "title": "ADR-0002 fail-closed 多租户隔离",
+      "summary": "隔离默认拒绝：无上下文报错/原生SQL需承诺/鉴权不匹配拒；封 F2 泄漏的决策与后果。",
+      "tags": [
+        "adr",
+        "multi-tenant",
+        "security",
+        "fail-closed"
+      ],
+      "status": "accepted",
+      "source_of_truth": "decision",
+      "depends_on": [
+        "architecture.overview",
+        "guides.database"
+      ],
+      "tokens": 637
+    },
+    {
+      "id": "skill-alun",
+      "path": "skill-alun/SKILL.md",
+      "title": "alun 使用技能（AI Skill）",
+      "summary": "面向 AI 的 alun 使用总纲，串起 references 各专题。",
+      "tags": [
+        "skill",
+        "ai"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "docs.index"
+      ],
+      "tokens": 13625
+    },
+    {
+      "id": "skill-alun.references.auth",
+      "path": "skill-alun/references/auth.md",
+      "title": "认证 / JWT 专题",
+      "summary": "JWT 签发与校验、ClaimsBuilder、TokenClaims、extra 字段、缓存命名空间。",
+      "tags": [
+        "auth",
+        "jwt"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 4065
+    },
+    {
+      "id": "skill-alun.references.config",
+      "path": "skill-alun/references/config.md",
+      "title": "配置专题",
+      "summary": "config 系统、provider、自定义配置类型、环境变量与 profile。",
+      "tags": [
+        "config"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 3571
+    },
+    {
+      "id": "skill-alun.references.database",
+      "path": "skill-alun/references/database.md",
+      "title": "数据库专题",
+      "summary": "数据库实操深入：Model/Row、查询、事务、迁移、多租户、反模式。",
+      "tags": [
+        "database"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 11388
+    },
+    {
+      "id": "skill-alun.references.plugins",
+      "path": "skill-alun/references/plugins.md",
+      "title": "插件专题",
+      "summary": "WebPlugin、插件生命周期、插件间依赖与顺序。",
+      "tags": [
+        "plugin"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "architecture.overview"
+      ],
+      "tokens": 4458
+    },
+    {
+      "id": "skill-alun.references.routing",
+      "path": "skill-alun/references/routing.md",
+      "title": "路由专题",
+      "summary": "四种路由写法、双通道、路径参数、分组前缀。",
+      "tags": [
+        "routing"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 4277
+    },
+    {
+      "id": "skill-alun.references.task",
+      "path": "skill-alun/references/task.md",
+      "title": "定时任务 / 异步任务专题",
+      "summary": "定时任务、分布式异步任务、Kafka 任务。",
+      "tags": [
+        "task",
+        "kafka",
+        "scheduler"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "guides.getting-started"
+      ],
+      "tokens": 4676
+    },
+    {
+      "id": "skill-alun.references.utils",
+      "path": "skill-alun/references/utils.md",
+      "title": "工具专题",
+      "summary": "校验、ID 生成、时间、JSON 等通用工具。",
+      "tags": [
+        "utils"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [],
+      "tokens": 5297
+    },
+    {
+      "id": "skill-alun.references.advanced-db",
+      "path": "skill-alun/references/advanced-db.md",
+      "title": "高级数据库专题",
+      "summary": "联查、排序白名单、原生 SQL 租户注记、命名数据源。",
+      "tags": [
+        "database",
+        "multi-tenant",
+        "advanced"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "guides.database"
+      ],
+      "tokens": 1665
+    },
+    {
+      "id": "skill-alun.references.extension-points",
+      "path": "skill-alun/references/extension-points.md",
+      "title": "扩展点专题",
+      "summary": "on_startup、中间件钩子、layer、WebPlugin、两条路由通道、行级异步 Hook。",
+      "tags": [
+        "extension",
+        "middleware",
+        "hook"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "architecture.overview"
+      ],
+      "tokens": 1488
+    },
+    {
+      "id": "skill-alun.references.realtime-sse",
+      "path": "skill-alun/references/realtime-sse.md",
+      "title": "实时推送 SSE 专题",
+      "summary": "SSE 实时推送、事件流、断线重连。",
+      "tags": [
+        "realtime",
+        "sse"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "guides.fullstack"
+      ],
+      "tokens": 827
+    },
+    {
+      "id": "skill-alun.references.observability",
+      "path": "skill-alun/references/observability.md",
+      "title": "可观测性专题",
+      "summary": "指标埋点、Prometheus、安全指标（租户作用域缺失/原生SQL未绑租户）。",
+      "tags": [
+        "observability",
+        "metrics",
+        "security"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 1142
+    },
+    {
+      "id": "skill-alun.references.export-and-import",
+      "path": "skill-alun/references/export-and-import.md",
+      "title": "导出与导入专题",
+      "summary": "XLSX 导出、Excel/CSV 导入。",
+      "tags": [
+        "xlsx",
+        "export",
+        "import"
+      ],
+      "status": "active",
+      "source_of_truth": "docs",
+      "depends_on": [
+        "reference.crates"
+      ],
+      "tokens": 1083
+    }
+  ]
+}

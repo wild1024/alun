@@ -12,26 +12,25 @@
 //! ttl_secs = 300
 //! ```
 //!
+//! 启用后由 `App` 自动接入默认中间件链（无需手工挂载）；
+//! 也可用 `NonceLayer::new(cache, ttl)` 在特定路由上手工包裹。
+//!
 //! # 使用方式
 //!
 //! 1. 前端先调用 `GET /api/nonce` 获取 nonce
 //! 2. 后续写操作请求中携带 `X-Nonce: <获取到的nonce>`
 //! 3. 中间件校验 nonce 有效且未过期，校验通过后立即消费
 
-use axum::{
-    extract::Request,
-    response::Response,
-    body::Body,
-};
+use crate::response::{Res, codes};
+use alun_cache::Cache;
 use axum::http::StatusCode;
+use axum::{body::Body, extract::Request, response::Response};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tower::{Layer, Service};
-use alun_cache::Cache;
-use crate::response::{Res, codes};
 
 /// Nonce 防重放中间件
 ///
@@ -90,7 +89,8 @@ where
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let nonce = req.headers()
+        let nonce = req
+            .headers()
             .get("x-nonce")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
@@ -105,15 +105,16 @@ where
                 let ttl_secs = ttl.as_secs();
                 let placeholder = "1".to_string();
 
-                let exists = cache
-                    .get::<String>(&key)
-                    .await
-                    .unwrap_or(None);
+                let exists = cache.get::<String>(&key).await.unwrap_or(None);
 
                 if exists.is_some() {
                     let body = serde_json::to_string(&Res::<()>::fail(
-                        codes::CONFLICT, "请求已处理，请勿重复提交"
-                    )).unwrap_or_else(|_| r#"{"code":409,"msg":"请求已处理，请勿重复提交"}"#.to_string());
+                        codes::CONFLICT,
+                        "请求已处理，请勿重复提交",
+                    ))
+                    .unwrap_or_else(|_| {
+                        r#"{"code":409,"msg":"请求已处理，请勿重复提交"}"#.to_string()
+                    });
                     return Ok(Response::builder()
                         .status(StatusCode::CONFLICT)
                         .header("Content-Type", "application/json; charset=utf-8")

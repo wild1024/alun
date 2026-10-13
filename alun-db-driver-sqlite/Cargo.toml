@@ -1,0 +1,17 @@
+[package]
+name = "alun-db-driver-sqlite"
+version.workspace = true
+edition = "2024"
+description = "alun-db SQLite 驱动"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+alun-db-core = { version = "0.3.0", path = "../alun-db-core" }
+alun-db-sql  = { version = "0.3.0", path = "../alun-db-sql" }
+
+rusqlite = { version = "0.40.2", features = ["bundled", "chrono", "serde_json", "uuid", "column_decltype"] }
+tokio    = { version = "1.53", features = ["rt", "sync", "time"], optional = true }
+
+[features]
+default = ["async"]
+async = ["dep:tokio"]

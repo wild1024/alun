@@ -5,24 +5,23 @@
 #[cfg(test)]
 mod tests {
     use axum::Router;
-    use axum::http::{StatusCode, Request};
     use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode};
     use axum::routing::get;
-    use tower::ServiceExt;
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
+    use tower::ServiceExt;
 
-    use alun_core::api::Res;
-    use alun_config::{AppConfig, SecurityHeadersConfig};
     use alun_cache::{LocalCache, SharedCache};
-    use alun_web::middleware::{
-        AuthLayer, RequirePermissionLayer, RequireRoleLayer,
-        RateLimitLayer, IpWindow, SecurityHeadersLayer,
-        NonceLayer, IdempotencyLayer, RequestIdLayer,
-    };
+    use alun_config::{AppConfig, SecurityHeadersConfig};
+    use alun_web::api::Res;
     use alun_web::jwt::JWT;
+    use alun_web::middleware::{
+        AuthLayer, IdempotencyLayer, IpWindow, NonceLayer, RateLimitLayer, RequestIdLayer,
+        RequirePermissionLayer, RequireRoleLayer, SecurityHeadersLayer,
+    };
 
     fn test_jwt() -> (AppConfig, JWT) {
         let mut cfg = AppConfig::default();
@@ -43,11 +42,14 @@ mod tests {
     #[tokio::test]
     async fn test_full_auth_permission_chain() {
         let (cfg, jwt) = test_jwt();
-        let token = jwt.create_access_token(
-            "user-1", Some("alice"),
-            &["admin".into()],
-            &["admin:access".into()],
-        ).unwrap();
+        let token = jwt
+            .create_access_token(
+                "user-1",
+                Some("alice"),
+                &["admin".into()],
+                &["admin:access".into()],
+            )
+            .unwrap();
 
         let app = Router::new()
             .route("/api/admin/stats", get(|| async { Res::ok("stats") }))
@@ -58,12 +60,16 @@ mod tests {
                 cache: None,
             });
 
-        let resp = app.oneshot(
-            Request::builder()
-                .uri("/api/admin/stats")
-                .header("Authorization", format!("Bearer {}", token))
-                .body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/stats")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
@@ -75,7 +81,9 @@ mod tests {
     #[tokio::test]
     async fn test_auth_permission_chain_no_permission() {
         let (cfg, jwt) = test_jwt();
-        let token = jwt.create_access_token("user-1", Some("bob"), &[], &[]).unwrap();
+        let token = jwt
+            .create_access_token("user-1", Some("bob"), &[], &[])
+            .unwrap();
 
         let app = Router::new()
             .route("/api/admin/stats", get(|| async { Res::ok("stats") }))
@@ -86,12 +94,16 @@ mod tests {
                 cache: None,
             });
 
-        let resp = app.oneshot(
-            Request::builder()
-                .uri("/api/admin/stats")
-                .header("Authorization", format!("Bearer {}", token))
-                .body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/stats")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
@@ -104,11 +116,14 @@ mod tests {
     #[tokio::test]
     async fn test_auth_role_permission_chain() {
         let (cfg, jwt) = test_jwt();
-        let token = jwt.create_access_token(
-            "admin-1", Some("admin"),
-            &["admin".into()],
-            &["admin:access".into()],
-        ).unwrap();
+        let token = jwt
+            .create_access_token(
+                "admin-1",
+                Some("admin"),
+                &["admin".into()],
+                &["admin:access".into()],
+            )
+            .unwrap();
 
         let app = Router::new()
             .route("/api/admin/settings", get(|| async { Res::ok("settings") }))
@@ -120,12 +135,16 @@ mod tests {
                 cache: None,
             });
 
-        let resp = app.oneshot(
-            Request::builder()
-                .uri("/api/admin/settings")
-                .header("Authorization", format!("Bearer {}", token))
-                .body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/settings")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
     }
@@ -133,11 +152,14 @@ mod tests {
     #[tokio::test]
     async fn test_auth_role_chain_wrong_role() {
         let (cfg, jwt) = test_jwt();
-        let token = jwt.create_access_token(
-            "user-1", Some("jane"),
-            &["user".into()],
-            &["admin:access".into()],
-        ).unwrap();
+        let token = jwt
+            .create_access_token(
+                "user-1",
+                Some("jane"),
+                &["user".into()],
+                &["admin:access".into()],
+            )
+            .unwrap();
 
         let app = Router::new()
             .route("/api/admin/settings", get(|| async { Res::ok("settings") }))
@@ -149,12 +171,16 @@ mod tests {
                 cache: None,
             });
 
-        let resp = app.oneshot(
-            Request::builder()
-                .uri("/api/admin/settings")
-                .header("Authorization", format!("Bearer {}", token))
-                .body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/settings")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
@@ -170,11 +196,17 @@ mod tests {
         let token = jwt.create_access_token("u1", None, &[], &[]).unwrap();
 
         let sec_config = SecurityHeadersConfig {
-            enabled: true, nosniff: true, frame_options: true,
-            hsts: false, csp: false, referrer_policy: false,
+            enabled: true,
+            nosniff: true,
+            frame_options: true,
+            hsts: false,
+            csp: false,
+            referrer_policy: false,
             permissions_policy: false,
-            hsts_max_age_secs: 31536000, hsts_include_subdomains: false,
-            csp_value: String::new(), referrer_policy_value: String::new(),
+            hsts_max_age_secs: 31536000,
+            hsts_include_subdomains: false,
+            csp_value: String::new(),
+            referrer_policy_value: String::new(),
             permissions_policy_value: String::new(),
         };
 
@@ -188,15 +220,22 @@ mod tests {
             .layer(SecurityHeadersLayer::new(sec_config))
             .layer(RequestIdLayer);
 
-        let resp = app.oneshot(
-            Request::builder()
-                .uri("/api/secure")
-                .header("Authorization", format!("Bearer {}", token))
-                .body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/secure")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(resp.headers().get("x-content-type-options").unwrap(), "nosniff");
+        assert_eq!(
+            resp.headers().get("x-content-type-options").unwrap(),
+            "nosniff"
+        );
         assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
     }
 
@@ -225,23 +264,32 @@ mod tests {
             });
 
         for _ in 0..2 {
-            let resp = app.clone().oneshot(
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/data")
+                        .header("Authorization", format!("Bearer {}", token))
+                        .header("x-forwarded-for", "10.0.0.10")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+
+        let resp = app
+            .oneshot(
                 Request::builder()
                     .uri("/api/data")
                     .header("Authorization", format!("Bearer {}", token))
                     .header("x-forwarded-for", "10.0.0.10")
-                    .body(Body::empty()).unwrap()
-            ).await.unwrap();
-            assert_eq!(resp.status(), StatusCode::OK);
-        }
-
-        let resp = app.oneshot(
-            Request::builder()
-                .uri("/api/data")
-                .header("Authorization", format!("Bearer {}", token))
-                .header("x-forwarded-for", "10.0.0.10")
-                .body(Body::empty()).unwrap()
-        ).await.unwrap();
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
     }
@@ -255,7 +303,7 @@ mod tests {
     async fn test_nonce_auth_chain_replay_prevention() {
         let (cfg, jwt) = test_jwt();
         let token = jwt.create_access_token("u1", None, &[], &[]).unwrap();
-        let local = LocalCache::new(100, 0);
+        let local = LocalCache::new("", 100, 0);
         let cache = Arc::new(SharedCache::Local(local));
 
         let app = Router::new()
@@ -269,22 +317,31 @@ mod tests {
 
         let nonce = "transfer-nonce-001";
 
-        let resp1 = app.clone().oneshot(
-            Request::builder()
-                .uri("/api/transfer")
-                .header("Authorization", format!("Bearer {}", token))
-                .header("x-nonce", nonce)
-                .body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let resp1 = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/transfer")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("x-nonce", nonce)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp1.status(), StatusCode::OK);
 
-        let resp2 = app.oneshot(
-            Request::builder()
-                .uri("/api/transfer")
-                .header("Authorization", format!("Bearer {}", token))
-                .header("x-nonce", nonce)
-                .body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let resp2 = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/transfer")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("x-nonce", nonce)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp2.status(), StatusCode::CONFLICT);
     }
 
@@ -296,7 +353,7 @@ mod tests {
     async fn test_idempotency_auth_chain() {
         let (cfg, jwt) = test_jwt();
         let token = jwt.create_access_token("u1", None, &[], &[]).unwrap();
-        let local = LocalCache::new(100, 0);
+        let local = LocalCache::new("", 100, 0);
         let cache = Arc::new(SharedCache::Local(local));
 
         let app = Router::new()
@@ -310,13 +367,18 @@ mod tests {
 
         let key = "pay-key-001";
         for _ in 0..3 {
-            let resp = app.clone().oneshot(
-                Request::builder()
-                    .uri("/api/pay")
-                    .header("Authorization", format!("Bearer {}", token))
-                    .header("x-idempotency-key", key)
-                    .body(Body::empty()).unwrap()
-            ).await.unwrap();
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/pay")
+                        .header("Authorization", format!("Bearer {}", token))
+                        .header("x-idempotency-key", key)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK, "幂等请求都应成功");
         }
     }

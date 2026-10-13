@@ -1,7 +1,7 @@
 //! 存储后端注册中心
 //!
 //! 按 `backend_type` 管理所有 `StorageBackend` 实例及其配置。
-//! 支持运行时手动注册和编译期自动发现（linkme 分布式切片）。
+//! 支持运行时手动注册和编译期自动发现（`inventory` 收集）。
 //!
 //! 参考 alun_task::HandlerRegistry 的设计模式。
 
@@ -51,16 +51,14 @@ impl BackendRegistry {
 
     /// 从编译期自动发现的后端注册
     ///
-    /// 读取 [`STORAGE_BACKENDS`](crate::types::STORAGE_BACKENDS) 分布式切片中的所有条目并注册。
+    /// 遍历 [`crate::types::discovered_storage_backends`]（由 `inventory` 收集）并注册。
     /// 可安全调用多次（后续条目覆盖先前的同名 backend_type）。
     pub fn from_discovered(&mut self) -> &mut Self {
-        for entry in crate::types::STORAGE_BACKENDS {
+        for entry in crate::types::discovered_storage_backends() {
             let backend = (entry.constructor_fn)();
             let config = (entry.config_fn)();
-            self.backends.insert(
-                entry.backend_type.to_string(),
-                (Arc::from(backend), config),
-            );
+            self.backends
+                .insert(entry.backend_type.to_string(), (Arc::from(backend), config));
         }
         self
     }
@@ -141,7 +139,9 @@ mod tests {
     struct TestBackend;
     #[async_trait]
     impl StorageBackend for TestBackend {
-        fn backend_type(&self) -> &str { "test" }
+        fn backend_type(&self) -> &str {
+            "test"
+        }
         async fn write(&self, _name: &str, _data: &[u8]) -> Result<FileMeta, String> {
             Err("not implemented".into())
         }
@@ -151,17 +151,24 @@ mod tests {
         async fn read(&self, _path: &str) -> Result<Vec<u8>, String> {
             Err("not implemented".into())
         }
-        async fn delete(&self, _path: &str) -> Result<(), String> { Ok(()) }
-        async fn exists(&self, _path: &str) -> bool { false }
+        async fn delete(&self, _path: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn exists(&self, _path: &str) -> bool {
+            false
+        }
     }
 
     #[test]
     fn test_register_and_get() {
         let mut reg = BackendRegistry::new();
-        reg.register(TestBackend, BackendConfig {
-            backend_type: "test".into(),
-            ..Default::default()
-        });
+        reg.register(
+            TestBackend,
+            BackendConfig {
+                backend_type: "test".into(),
+                ..Default::default()
+            },
+        );
 
         assert_eq!(reg.len(), 1);
         assert!(reg.get("test").is_some());
@@ -171,10 +178,13 @@ mod tests {
     #[test]
     fn test_default_backend() {
         let mut reg = BackendRegistry::new();
-        reg.register(TestBackend, BackendConfig {
-            backend_type: "test".into(),
-            ..Default::default()
-        });
+        reg.register(
+            TestBackend,
+            BackendConfig {
+                backend_type: "test".into(),
+                ..Default::default()
+            },
+        );
 
         assert!(reg.default_backend().is_some());
 
@@ -185,10 +195,13 @@ mod tests {
     #[test]
     fn test_with_default() {
         let mut reg = BackendRegistry::new();
-        reg.register(TestBackend, BackendConfig {
-            backend_type: "test".into(),
-            ..Default::default()
-        });
+        reg.register(
+            TestBackend,
+            BackendConfig {
+                backend_type: "test".into(),
+                ..Default::default()
+            },
+        );
 
         reg.with_default("test");
         assert!(reg.default_backend().is_some());

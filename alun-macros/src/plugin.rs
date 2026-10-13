@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemStruct};
+use syn::{ItemStruct, parse_macro_input};
 
 /// `#[plugin]`：为结构体自动 impl PluginRegistration 标记 trait
 pub fn plugin_impl(item: TokenStream) -> TokenStream {

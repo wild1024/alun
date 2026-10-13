@@ -1,18 +1,14 @@
 //! 认证中间件：JWT Bearer Token 验证 + 黑名单检查
 
-use axum::{
-    extract::Request,
-    response::Response,
-    body::Body,
-};
+use super::{AuthClaims, TokenClaims, TokenType, UserId};
+use crate::response::{Res, codes};
 use axum::http::StatusCode;
+use axum::{body::Body, extract::Request, response::Response};
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::collections::HashSet;
 use tower::{Layer, Service};
-use crate::response::{Res, codes};
-use super::{UserId, AuthClaims, TokenClaims, TokenType};
 
 /// JWT 认证中间件
 ///
@@ -87,9 +83,13 @@ where
         // 1. 精确匹配
         // 2. 前缀匹配（如 /api 匹配 /api/xxx，/api/files/dl 匹配 /api/files/dl/xxx）
         let is_ignore_path = self.ignore_paths.contains(&path)
-            || self.ignore_paths.iter().any(|p| path.starts_with(&format!("{}/", p)));
+            || self
+                .ignore_paths
+                .iter()
+                .any(|p| path.starts_with(&format!("{}/", p)));
 
-        let token_opt: Option<&str> = req.headers()
+        let token_opt: Option<&str> = req
+            .headers()
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "));
@@ -106,19 +106,24 @@ where
                         #[cfg(feature = "cache")]
                         {
                             // 黑名单检查：仅在非 ignore_path 时拒绝，ignore_path 应放行
-                            if !is_ignore {
-                                if let (Some(ref c), Some(ref jti)) = (&cache, &claims.jti) {
-                                    let key = format!("token:blacklist:{}", jti);
-                                    if let Ok(Some(_)) = alun_cache::Cache::get::<serde_json::Value>(c, &key).await {
-                                        let body = serde_json::to_string(&Res::<()>::fail(
-                                            codes::UNAUTHORIZED, "Token 已登出，请重新登录"
-                                        )).unwrap_or_else(|_| r#"{"code":401,"msg":"Token 已登出，请重新登录"}"#.to_string());
-                                        return Ok(Response::builder()
-                                            .status(StatusCode::UNAUTHORIZED)
-                                            .header("Content-Type", "application/json; charset=utf-8")
-                                            .body(Body::from(body))
-                                            .expect("response body build failed"));
-                                    }
+                            if !is_ignore && let (Some(c), Some(jti)) = (&cache, &claims.jti) {
+                                let key = format!("token:blacklist:{}", jti);
+                                if let Ok(Some(_)) =
+                                    alun_cache::Cache::get::<serde_json::Value>(c, &key).await
+                                {
+                                    let body = serde_json::to_string(&Res::<()>::fail(
+                                        codes::UNAUTHORIZED,
+                                        "Token 已登出，请重新登录",
+                                    ))
+                                    .unwrap_or_else(|_| {
+                                        r#"{"code":401,"msg":"Token 已登出，请重新登录"}"#
+                                            .to_string()
+                                    });
+                                    return Ok(Response::builder()
+                                        .status(StatusCode::UNAUTHORIZED)
+                                        .header("Content-Type", "application/json; charset=utf-8")
+                                        .body(Body::from(body))
+                                        .expect("response body build failed"));
                                 }
                             }
                         }
@@ -137,8 +142,12 @@ where
                         Box::pin(async move { inner.call(req).await })
                     } else {
                         let body = serde_json::to_string(&Res::<()>::fail(
-                            codes::UNAUTHORIZED, "Token 无效或已过期"
-                        )).unwrap_or_else(|_| r#"{"code":401,"msg":"Token 无效或已过期"}"#.to_string());
+                            codes::UNAUTHORIZED,
+                            "Token 无效或已过期",
+                        ))
+                        .unwrap_or_else(|_| {
+                            r#"{"code":401,"msg":"Token 无效或已过期"}"#.to_string()
+                        });
                         Box::pin(async move {
                             Ok(Response::builder()
                                 .status(StatusCode::UNAUTHORIZED)
@@ -156,8 +165,10 @@ where
                     Box::pin(async move { inner.call(req).await })
                 } else {
                     let body = serde_json::to_string(&Res::<()>::fail(
-                        codes::UNAUTHORIZED, "未授权访问，请先登录"
-                    )).unwrap_or_else(|_| r#"{"code":401,"msg":"未授权访问，请先登录"}"#.to_string());
+                        codes::UNAUTHORIZED,
+                        "未授权访问，请先登录",
+                    ))
+                    .unwrap_or_else(|_| r#"{"code":401,"msg":"未授权访问，请先登录"}"#.to_string());
                     Box::pin(async move {
                         Ok(Response::builder()
                             .status(StatusCode::UNAUTHORIZED)
@@ -171,8 +182,20 @@ where
     }
 }
 
-fn validate_and_extract_claims(secret: &str, token: &str) -> Result<TokenClaims, String> {
-    use jsonwebtoken::{decode, DecodingKey, Validation};
+/// 校验 JWT 并提取声明 —— **认证的唯一真值实现**。
+///
+/// `AuthLayer` 与 `AuthClaims` 的提取器（`FromRequestParts` 通道 2）都调用它，
+/// 因此两者对「Token 是否有效」的判定永远一致。新增校验规则（如受众 `aud`、
+/// 签发方 `iss`、时钟偏移）只需改这里，两处自动同步。
+///
+/// # 错误
+///
+/// 返回 `Err` 的原因字符串仅用于日志/调试；对外一律映射为 401，不泄漏细节。
+pub(crate) fn validate_and_extract_claims(
+    secret: &str,
+    token: &str,
+) -> Result<TokenClaims, String> {
+    use jsonwebtoken::{DecodingKey, Validation, decode};
 
     let token_data = decode::<TokenClaims>(
         token,

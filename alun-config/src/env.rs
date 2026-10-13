@@ -53,10 +53,10 @@ pub fn parse_args() -> (bool, bool) {
 ///   - `FACAI_JWT_SECRET` / `ALUN_MIDDLEWARE_AUTH_JWT_SECRET`：JWT 签名密钥（生产环境必填）
 pub fn merge_env_overrides(cfg: &mut AppConfig) {
     // 专用别名：FACAI_JWT_SECRET 优先覆盖 JWT 密钥（安全修复 P0-5）
-    if let Ok(value) = env::var("FACAI_JWT_SECRET") {
-        if !value.is_empty() {
-            cfg.middleware.auth.jwt_secret = value;
-        }
+    if let Ok(value) = env::var("FACAI_JWT_SECRET")
+        && !value.is_empty()
+    {
+        cfg.middleware.auth.jwt_secret = value;
     }
 
     for (key, value) in env::vars() {

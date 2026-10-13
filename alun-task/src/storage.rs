@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{TaskConfig, TaskStatus, SubmitTaskParams};
+use crate::types::{SubmitTaskParams, TaskConfig, TaskStatus};
 
 /// 扫描到的可重试任务
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,11 +54,7 @@ pub trait TaskStorage: Send + Sync {
     /// 更新任务状态
     ///
     /// 状态变更时机：提交后 Pending → Worker 拾取 Processing → 成功 Completed / 失败 Failed / DLQ DeadLetter
-    async fn update_task_status(
-        &self,
-        task_id: &str,
-        status: TaskStatus,
-    ) -> Result<(), String>;
+    async fn update_task_status(&self, task_id: &str, status: TaskStatus) -> Result<(), String>;
 
     /// 获取当前重试次数
     async fn get_retry_count(&self, task_id: &str) -> Result<i64, String>;

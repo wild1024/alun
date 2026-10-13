@@ -179,10 +179,10 @@ impl FsPlugin {
 
     /// 解析目标后端：按 backend_type 查找，回退到默认
     fn resolve_backend(&self, backend_type: Option<&str>) -> StoreResult<&Arc<dyn StorageBackend>> {
-        if let Some(bt) = backend_type {
-            if let Some(b) = self.registry.get(bt) {
-                return Ok(b);
-            }
+        if let Some(bt) = backend_type
+            && let Some(b) = self.registry.get(bt)
+        {
+            return Ok(b);
         }
         self.registry
             .default_backend()

@@ -1,7 +1,7 @@
 [package]
 name = "alun"
 description = "Alun: A fast, simple, and productive Rust web framework - config-driven, plugin-extensible, batteries included"
-version = "0.1.4"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -15,33 +15,135 @@ categories = ["web-programming", "api-bindings"]
 
 [dependencies]
 alun-core = { workspace = true }
+alun-utils = { workspace = true }
 alun-macros = { workspace = true }
 alun-web = { workspace = true, features = ["config"] }
 alun-config = { workspace = true }
-alun-db = { workspace = true, optional = true }
+alun-db = { workspace = true, optional = true, default-features = false }
 alun-template = { workspace = true, optional = true }
 alun-cache = { workspace = true, optional = true }
 alun-plugin = { workspace = true, optional = true }
 alun-kafka = { workspace = true, optional = true }
-alun-task = { workspace = true, optional = true }
-alun-fs = { workspace = true, optional = true }
+alun-task = { workspace = true, optional = true, default-features = false }
+alun-fs = { workspace = true, optional = true, default-features = false }
 axum = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
-linkme = { workspace = true }
+inventory = { workspace = true }
 uuid = { workspace = true }
 
 [features]
-default = ["full"]
-full = ["db", "template", "cache", "plugin", "kafka", "task", "fs"]
+# 默认 = **最小可用**：一个能起 HTTP 服务的框架（路由 + 中间件 + 配置 + 日志）。
+# 不含任何数据库驱动、消息队列、对象存储后端——按需逐步叠加能力。
+default = ["core"]
+
+# ══════════════════════════════════════════════════════════════════
+#  L0 · 核心（core）：无外部重量级依赖
+# ══════════════════════════════════════════════════════════════════
+# `config` 是 `App::new()` / `config.toml` 的基础，随 `core` 恒定开启。
+core = ["config"]
+
+# ══════════════════════════════════════════════════════════════════
+#  L1 · 基础设施能力（相互独立，按需叠加）
+# ══════════════════════════════════════════════════════════════════
 config = ["alun-web/config"]
-db = ["config", "dep:alun-db", "alun-web/db"]
 template = ["dep:alun-template", "alun-web/template"]
 cache = ["dep:alun-cache", "alun-web/cache"]
 plugin = ["dep:alun-plugin"]
+fs = ["fs-local"]
+# SSE（Server-Sent Events）：单向实时推送辅助（无重量依赖，仅 futures-util）。
+sse = ["alun-web/sse"]
+
+# ══════════════════════════════════════════════════════════════════
+#  F10 · 可观测性（metrics）
+#  `metrics`            —— 埋点（HTTP 计数器/直方图 + DB 查询 + 缓存命中）。
+#                          未安装 recorder 时是 no-op，可安全常开。
+#  `metrics-prometheus` —— 额外提供 Prometheus recorder 与受保护的 `/metrics` 端点。
+# ══════════════════════════════════════════════════════════════════
+metrics = ["alun-web/metrics", "alun-db?/metrics", "alun-cache?/metrics"]
+metrics-prometheus = ["metrics", "alun-web/metrics-prometheus"]
+
+# ══════════════════════════════════════════════════════════════════
+#  L2 · 数据库：**能力与驱动分离**
+#  只开 `db` 是「没有驱动的数据库能力」——必须再选一个驱动。
+#  驱动 feature 各自隐含 `db`，所以通常只写 `features = ["postgres"]`。
+# ══════════════════════════════════════════════════════════════════
+# 注意：**不串联 `alun-core/db`**（该 feature 已不存在）——alun-core 与数据库内核
+# 互不依赖是硬约束。数据库错误在 handler 里的收敛由 `alun-web` 的 `ApiError` 承担
+# （`From<DbError> for ApiError`，见 `alun-web/src/api.rs`；早期的 `WebError` 已删除）。
+db = ["config", "dep:alun-db", "alun-web/db", "alun-db/async"]
+sqlite = ["db", "alun-db/sqlite"]
+postgres = ["db", "alun-db/postgres"]
+mysql = ["db", "alun-db/mysql"]
+
+# ══════════════════════════════════════════════════════════════════
+#  L2 · 文件存储后端（正交于 `fs` 能力本身）
+# ══════════════════════════════════════════════════════════════════
+fs-local = ["dep:alun-fs", "alun-fs/local"]
+fs-minio = ["dep:alun-fs", "alun-fs/minio"]
+
+# ══════════════════════════════════════════════════════════════════
+#  L3 · 重型后端（默认全关；各自引入大量外部依赖 / 系统构建链）
+#  `kafka` / `task` 的 Kafka 后端需要 CMake + C 工具链（librdkafka）。
+# ══════════════════════════════════════════════════════════════════
 kafka = ["dep:alun-kafka"]
-task = ["dep:alun-task"]
-fs = ["dep:alun-fs"]
+# `task`：**任务模型**（`#[task_handler]` 收集、存储抽象、类型、重试策略）——无 Kafka、零外部依赖。
+task = ["dep:alun-task", "alun-task/model"]
+# `task-kafka`：在 `task` 之上再加 Kafka 生产/消费 worker 与 `TaskPlugin`。
+# 传递依赖 `rdkafka`，构建需要 CMake + C 工具链。
+task-kafka = ["task", "alun-task/kafka"]
+
+# ══════════════════════════════════════════════════════════════════
+#  生态类型映射（模型字段用到才需要）
+# ══════════════════════════════════════════════════════════════════
+chrono = ["db", "alun-db/chrono"]
+time = ["db", "alun-db/time"]
+jiff = ["db", "alun-db/jiff"]
+rust_decimal = ["db", "alun-db/rust_decimal"]
+bigdecimal = ["db", "alun-db/bigdecimal"]
+uuid = ["db", "alun-db/uuid"]
+ulid = ["db", "alun-db/ulid"]
+json = ["db", "alun-db/json"]
+ipnetwork = ["db", "alun-db/ipnetwork"]
+
+# ══════════════════════════════════════════════════════════════════
+#  工具
+# ══════════════════════════════════════════════════════════════════
+# HTML 净化：转发 alun-utils 的 xss（模块经 `alun::xss` / prelude 暴露）
+xss = ["alun-utils/xss"]
+
+# 真 XLSX（OOXML）：转发 alun-utils 的 xlsx（导出工作簿 / 解析工作簿）。
+# 不开本特性时 `Export::to_xlsx_*` **不存在**——不会退化成「返回 CSV」。
+xlsx = ["alun-utils/xlsx"]
+
+# ══════════════════════════════════════════════════════════════════
+#  预设组合（Preset）——按场景一键选用，命名力求最短
+#
+#    mini  ⊂  lite  ⊂  full      （能力严格递增）
+#
+# ══════════════════════════════════════════════════════════════════
+# mini：单机自足 —— SQLite + 本地缓存，**零外部服务**。原型 / 小工具 / 测试。
+mini = ["core", "sqlite", "cache"]
+# lite：单库生产（推荐）—— PostgreSQL + 缓存 + 插件 + 本地存储。
+# 模板不在本预设内：它是纯可选单点，用得到就自己加 `features = ["lite", "template"]`。
+lite = ["core", "postgres", "cache", "plugin", "fs-local"]
+# full：全部能力 —— 在 lite 之上再加 MySQL / Kafka / Task(Kafka 后端) / MinIO / SSE /
+# 可观测性（metrics 埋点 + Prometheus 导出端点）/ 真 XLSX / 模板。
+full = [
+    "lite",
+    "mysql",
+    "kafka",
+    "task-kafka",
+    "fs-minio",
+    "sse",
+    "metrics-prometheus",
+    "xlsx",
+    "template",
+]
+
+[dev-dependencies]
+# 仅用于 doctest：文档示例演示 `#[derive(Validate)]` 需要 validator 在作用域内
+validator = { workspace = true }

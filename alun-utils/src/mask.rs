@@ -6,7 +6,8 @@ use std::sync::LazyLock;
 
 static MOBILE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^1[3-9]\d{9}$").unwrap());
 static ID_CARD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{17}[\dXx]$").unwrap());
-static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[\w.\-]+@[\w.\-]+\.\w+$").unwrap());
+static EMAIL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\w.\-]+@[\w.\-]+\.\w+$").unwrap());
 
 /// 递归对 JSON 进行脱敏
 ///
@@ -20,7 +21,11 @@ static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[\w.\-]+@[\w.\
 pub fn mask_json_value(value: Value, sensitive_fields: &[&str]) -> Value {
     match value {
         Value::Object(map) => mask_object(map, sensitive_fields),
-        Value::Array(arr) => Value::Array(arr.into_iter().map(|v| mask_json_value(v, sensitive_fields)).collect()),
+        Value::Array(arr) => Value::Array(
+            arr.into_iter()
+                .map(|v| mask_json_value(v, sensitive_fields))
+                .collect(),
+        ),
         other => mask_scalar_if_needed(other),
     }
 }
@@ -28,9 +33,9 @@ pub fn mask_json_value(value: Value, sensitive_fields: &[&str]) -> Value {
 fn mask_object(map: Map<String, Value>, sensitive_fields: &[&str]) -> Value {
     let mut masked = Map::new();
     for (key, val) in map {
-        let is_sensitive = sensitive_fields.iter().any(|f| {
-            f.eq_ignore_ascii_case(&key)
-        });
+        let is_sensitive = sensitive_fields
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(&key));
         if is_sensitive {
             masked.insert(key, Value::String("****".into()));
         } else {
@@ -44,15 +49,16 @@ fn mask_scalar_if_needed(val: Value) -> Value {
     match &val {
         Value::String(s) => {
             let s = s.trim();
-            if s.is_empty() { return val; }
+            if s.is_empty() {
+                return val;
+            }
             // 手机号：正则已校验 11 位纯数字 1[3-9]\d{9}，不再依赖 starts_with('1') 避免误匹配多字节字符
             if MOBILE_RE.is_match(s) {
                 return Value::String(mask_mobile(s));
             }
-            if s.len() >= 15 && s.len() <= 20 && contains_alpha_numeric(s) {
-                if ID_CARD_RE.is_match(s) {
-                    return Value::String(mask_id_card(s));
-                }
+            if s.len() >= 15 && s.len() <= 20 && contains_alpha_numeric(s) && ID_CARD_RE.is_match(s)
+            {
+                return Value::String(mask_id_card(s));
             }
             if EMAIL_RE.is_match(s) {
                 return Value::String(mask_email(s));
@@ -70,7 +76,9 @@ fn contains_alpha_numeric(s: &str) -> bool {
 fn mask_mobile(s: &str) -> String {
     // 使用字符切片避免在多字节字符上越界（防御性编程）
     let chars: Vec<char> = s.chars().collect();
-    if chars.len() < 7 { return s.to_string(); }
+    if chars.len() < 7 {
+        return s.to_string();
+    }
     let prefix: String = chars[..3].iter().collect();
     let suffix: String = chars[chars.len() - 4..].iter().collect();
     format!("{}****{}", prefix, suffix)
@@ -78,7 +86,9 @@ fn mask_mobile(s: &str) -> String {
 
 fn mask_id_card(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
-    if chars.len() < 8 { return s.to_string(); }
+    if chars.len() < 8 {
+        return s.to_string();
+    }
     let prefix: String = chars[..4].iter().collect();
     let suffix: String = chars[chars.len() - 4..].iter().collect();
     format!("{}****{}", prefix, suffix)
@@ -87,9 +97,14 @@ fn mask_id_card(s: &str) -> String {
 fn mask_email(s: &str) -> String {
     if let Some(at) = s.find('@') {
         let prefix = &s[..at];
-        if prefix.len() <= 2 { format!("*{}", &s[at..]) }
-        else { format!("{}***{}", &prefix[..1], &s[at..]) }
-    } else { s.to_string() }
+        if prefix.len() <= 2 {
+            format!("*{}", &s[at..])
+        } else {
+            format!("{}***{}", &prefix[..1], &s[at..])
+        }
+    } else {
+        s.to_string()
+    }
 }
 
 /// 敏感信息脱敏工具 —— 对手机号、邮箱、身份证、银行卡、人名等进行部分遮盖
@@ -105,29 +120,43 @@ pub struct Mask;
 
 impl Mask {
     /// 手机号脱敏：保留前3后4位
-    pub fn mobile(phone: &str) -> String { mask_mobile(phone) }
+    pub fn mobile(phone: &str) -> String {
+        mask_mobile(phone)
+    }
     /// 邮箱脱敏：保留首字符和域名部分
-    pub fn email(email: &str) -> String { mask_email(email) }
+    pub fn email(email: &str) -> String {
+        mask_email(email)
+    }
     /// 身份证脱敏：保留前4后4位
-    pub fn id_card(id: &str) -> String { mask_id_card(id) }
+    pub fn id_card(id: &str) -> String {
+        mask_id_card(id)
+    }
     /// 银行卡脱敏：保留前4后4位，中间用 ` **** ` 分隔
     pub fn bank_card(card: &str) -> String {
-        if card.len() < 8 { return card.to_string(); }
-        format!("{} **** {}", &card[..4], &card[card.len()-4..])
+        if card.len() < 8 {
+            return card.to_string();
+        }
+        format!("{} **** {}", &card[..4], &card[card.len() - 4..])
     }
     /// 姓名脱敏：保留首字符，其余用 `*` 代替
     pub fn name(name: &str) -> String {
         let chars: Vec<char> = name.chars().collect();
-        if chars.len() <= 1 { return name.to_string(); }
+        if chars.len() <= 1 {
+            return name.to_string();
+        }
         let mut result = String::new();
         result.push(chars[0]);
-        for _ in 1..chars.len() { result.push('*'); }
+        for _ in 1..chars.len() {
+            result.push('*');
+        }
         result
     }
     /// 用户ID脱敏：保留前2后2字符
     pub fn user_id(id: &str) -> String {
-        if id.len() <= 4 { return "****".to_string(); }
-        format!("{}****{}", &id[..2], &id[id.len()-2..])
+        if id.len() <= 4 {
+            return "****".to_string();
+        }
+        format!("{}****{}", &id[..2], &id[id.len() - 2..])
     }
     /// 密码脱敏：固定返回 `******`
     pub fn password(_password: &str) -> String {
@@ -135,14 +164,18 @@ impl Mask {
     }
     /// 地址脱敏：保留前6个字符（省市区），其余用 `****` 代替
     pub fn address(addr: &str) -> String {
-        if addr.len() <= 6 { return "****".to_string(); }
+        if addr.len() <= 6 {
+            return "****".to_string();
+        }
         format!("{}****", &addr[..addr.len().min(6)])
     }
     /// 车牌号脱敏：保留首字符（省份简称）和末位，中间用 `****` 代替
     pub fn license_plate(plate: &str) -> String {
         let chars: Vec<char> = plate.chars().collect();
-        if chars.len() < 3 { return "****".to_string(); }
-        format!("{}****{}", chars[0], chars[chars.len()-1])
+        if chars.len() < 3 {
+            return "****".to_string();
+        }
+        format!("{}****{}", chars[0], chars[chars.len() - 1])
     }
     /// 根据数据类型自动选择脱敏方式
     ///
@@ -160,7 +193,11 @@ impl Mask {
             "email" => Self::email(value),
             "id_card" => Self::id_card(value),
             "name" => Self::name(value),
-            _ => format!("{}***{}", &value[..value.len().min(2)], &value[value.len()-value.len().min(2)..]),
+            _ => format!(
+                "{}***{}",
+                &value[..value.len().min(2)],
+                &value[value.len() - value.len().min(2)..]
+            ),
         }
     }
 }
@@ -169,7 +206,11 @@ impl Mask {
 mod tests {
     use super::*;
     #[test]
-    fn test_mobile() { assert_eq!(Mask::mobile("13812345678"), "138****5678"); }
+    fn test_mobile() {
+        assert_eq!(Mask::mobile("13812345678"), "138****5678");
+    }
     #[test]
-    fn test_email() { assert_eq!(Mask::email("alice@mail.com"), "a***@mail.com"); }
+    fn test_email() {
+        assert_eq!(Mask::email("alice@mail.com"), "a***@mail.com");
+    }
 }

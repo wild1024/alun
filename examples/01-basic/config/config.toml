@@ -1,11 +1,15 @@
-[app]
-name = "Alun Demo"
+# 应用名称与 profile 是根级标量，没有 [app] 表
+app_name = "Alun Demo"
+profile = "dev"
 
 [server]
-port = 8081
+# 监听地址，支持 "8081" 或 "127.0.0.1:8081"（不是 port）
+listen = "8081"
 
 [template]
 path = "templates"
 
-[middleware.request_log]
-enabled = true
+[middleware]
+# 请求 ID / 请求日志是布尔开关，不是 [middleware.request_log] 表
+request_id = true
+request_log = true

@@ -1,9 +1,9 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemStruct, Lit};
 use syn::parse::Parser;
+use syn::{ItemStruct, Lit, parse_macro_input};
 
-/// `#[task_handler]`：标记一个 TaskHandler 实现，编译期自动注册到 TASK_HANDLERS 分布式切片
+/// `#[task_handler]`：标记一个 TaskHandler 实现，编译期自动注册到 `inventory` 收集器
 ///
 /// # 参数
 ///
@@ -13,7 +13,7 @@ use syn::parse::Parser;
 /// | `priority` | Normal/High/Low/Critical | Normal | 任务优先级 |
 /// | `timeout_seconds` | u64 | 300 | 执行超时（秒） |
 /// | `max_retries` | u32 | 3 | 最大重试次数 |
-/// | `retry_strategy` | Fixed/Linear/Exponential | Linear | 重试策略 |
+/// | `retry_strategy` | 字符串字面量 `"Fixed"`/`"Linear"`/`"Exponential"` | `"Linear"` | 重试策略 |
 /// | `retry_delay_seconds` | u64 | 30 | 基础重试延迟（秒） |
 /// | `max_retry_delay_seconds` | u64 | 300 | 最大重试延迟（秒） |
 /// | `topic` | &str | "task_{task_type}" | Kafka topic 名称 |
@@ -48,7 +48,11 @@ pub fn task_handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut dead_letter_topic: Option<String> = None;
 
     let parser = syn::meta::parser(|meta| {
-        let name = meta.path.get_ident().map(|i| i.to_string()).unwrap_or_default();
+        let name = meta
+            .path
+            .get_ident()
+            .map(|i| i.to_string())
+            .unwrap_or_default();
         match name.as_str() {
             "task_type" => {
                 let value = meta.value().unwrap();
@@ -148,11 +152,6 @@ pub fn task_handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let topic_str = topic.unwrap_or_else(|| format!("task_{}", task_type_val));
 
-    let entry_name = quote::format_ident!(
-        "__ALUN_TASK_HANDLER_{}",
-        struct_name.to_string().to_uppercase()
-    );
-
     let dlq_expr: syn::Expr = if let Some(dlq) = dead_letter_topic {
         syn::parse_quote!(Some(#dlq.to_string()))
     } else {
@@ -162,23 +161,24 @@ pub fn task_handler_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let expanded = quote! {
         #input
 
-        #[::linkme::distributed_slice(::alun::alun_task::TASK_HANDLERS)]
-        static #entry_name: ::alun::alun_task::TaskHandlerEntry = ::alun::alun_task::TaskHandlerEntry {
-            task_type: #task_type_val,
-            handler_fn: || Box::new(#struct_name),
-            config_fn: || ::alun::alun_task::TaskConfig {
+        ::alun::inventory::submit! {
+            ::alun::alun_task::TaskHandlerEntry {
                 task_type: #task_type_val,
-                priority: #priority,
-                topic: #topic_str.to_string(),
-                timeout_seconds: #timeout_seconds,
-                max_retries: #max_retries,
-                retry_strategy: #retry_strategy,
-                retry_delay_seconds: #retry_delay_seconds,
-                max_retry_delay_seconds: #max_retry_delay_seconds,
-                description: #description,
-                dead_letter_topic: #dlq_expr,
-            },
-        };
+                handler_fn: || Box::new(#struct_name),
+                config_fn: || ::alun::alun_task::TaskConfig {
+                    task_type: #task_type_val,
+                    priority: #priority,
+                    topic: #topic_str.to_string(),
+                    timeout_seconds: #timeout_seconds,
+                    max_retries: #max_retries,
+                    retry_strategy: #retry_strategy,
+                    retry_delay_seconds: #retry_delay_seconds,
+                    max_retry_delay_seconds: #max_retry_delay_seconds,
+                    description: #description,
+                    dead_letter_topic: #dlq_expr,
+                },
+            }
+        }
     };
 
     expanded.into()

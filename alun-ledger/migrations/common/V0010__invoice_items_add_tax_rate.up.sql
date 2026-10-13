@@ -1,0 +1,1 @@
+ALTER TABLE invoice_items ADD COLUMN tax_rate VARCHAR(16) NOT NULL DEFAULT '0'

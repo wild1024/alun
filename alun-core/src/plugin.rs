@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::error::Result;
+use async_trait::async_trait;
 
 /// 插件生命周期：start/stop 对称
 ///
@@ -18,7 +18,7 @@ use crate::error::Result;
 ///     fn name(&self) -> &str { "pg" }
 ///
 ///     async fn start(&self) -> Result<()> {
-///         sqlx::query("SELECT 1").fetch_one(&self.pool).await?;
+///         sqlx::query("SELECT 1").find_one(&self.pool).await?;
 ///         Ok(())
 ///     }
 ///
@@ -54,7 +54,7 @@ pub trait Plugin: Send + Sync {
 }
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// 插件管理器：负责注册、拓扑排序启动、逆序关闭
 ///
@@ -75,7 +75,9 @@ pub struct PluginManager {
 impl PluginManager {
     /// 创建空的插件管理器
     pub fn new() -> Self {
-        Self { plugins: Vec::new() }
+        Self {
+            plugins: Vec::new(),
+        }
     }
 
     /// 手动注册插件（链式调用）
@@ -87,6 +89,8 @@ impl PluginManager {
     ///     .add(DbPlugin::new(db_config))
     ///     .add(CachePlugin::new(cache_config))
     /// ```
+    // 链式注册语义（push 而非算术加法），刻意不与 `std::ops::Add` 重载混淆
+    #[allow(clippy::should_implement_trait)]
     pub fn add<P: Plugin + 'static>(mut self, plugin: P) -> Self {
         self.plugins.push(Box::new(plugin));
         self
@@ -94,7 +98,7 @@ impl PluginManager {
 
     /// 编译期自动发现的插件批量注册
     ///
-    /// 与 `#[plugin]` 宏配合使用，将 linkme 收集到的插件批量加入管理器。
+    /// 与 `#[plugin]` 宏配合使用，将编译期收集到的插件批量加入管理器。
     pub fn add_discovered(mut self, plugins: Vec<Box<dyn Plugin>>) -> Self {
         self.plugins.extend(plugins);
         self
@@ -132,8 +136,9 @@ impl PluginManager {
     /// Kahn 算法拓扑排序，检测循环依赖
     ///
     /// 返回按依赖顺序排列的插件引用。若存在循环依赖则返回 `Config` 错误。
-    fn topological_sort(&self) -> Result<Vec<&Box<dyn Plugin>>> {
-        let name_to_idx: HashMap<&str, usize> = self.plugins
+    fn topological_sort(&self) -> Result<Vec<&dyn Plugin>> {
+        let name_to_idx: HashMap<&str, usize> = self
+            .plugins
             .iter()
             .enumerate()
             .map(|(i, p)| (p.name(), i))
@@ -152,13 +157,11 @@ impl PluginManager {
             }
         }
 
-        let mut queue: VecDeque<usize> = (0..count)
-            .filter(|&i| in_degree[i] == 0)
-            .collect();
+        let mut queue: VecDeque<usize> = (0..count).filter(|&i| in_degree[i] == 0).collect();
 
         let mut sorted = Vec::with_capacity(count);
         while let Some(u) = queue.pop_front() {
-            sorted.push(&self.plugins[u]);
+            sorted.push(self.plugins[u].as_ref());
             for &v in &adj[u] {
                 in_degree[v] -= 1;
                 if in_degree[v] == 0 {
@@ -169,14 +172,17 @@ impl PluginManager {
 
         if sorted.len() != count {
             // 检测循环依赖
-            let cycle: Vec<&str> = self.plugins.iter()
+            let cycle: Vec<&str> = self
+                .plugins
+                .iter()
                 .enumerate()
                 .filter(|(i, _)| in_degree[*i] > 0)
                 .map(|(_, p)| p.name())
                 .collect();
-            return Err(crate::error::Error::Config(
-                format!("插件循环依赖: {:?}", cycle)
-            ));
+            return Err(crate::error::Error::Config(format!(
+                "插件循环依赖: {:?}",
+                cycle
+            )));
         }
 
         Ok(sorted)
@@ -215,7 +221,9 @@ mod tests {
 
     #[async_trait]
     impl Plugin for TestPlugin {
-        fn name(&self) -> &str { self.name }
+        fn name(&self) -> &str {
+            self.name
+        }
         async fn start(&self) -> Result<()> {
             self.order.lock().push(format!("start:{}", self.name));
             Ok(())
@@ -224,7 +232,9 @@ mod tests {
             self.order.lock().push(format!("stop:{}", self.name));
             Ok(())
         }
-        fn depends_on(&self) -> &[&str] { self.deps }
+        fn depends_on(&self) -> &[&str] {
+            self.deps
+        }
     }
 
     #[tokio::test]
@@ -233,15 +243,18 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(TestPlugin {
-                name: "c", deps: &["a", "b"],
+                name: "c",
+                deps: &["a", "b"],
                 order: order.clone(),
             })
             .add(TestPlugin {
-                name: "b", deps: &["a"],
+                name: "b",
+                deps: &["a"],
                 order: order.clone(),
             })
             .add(TestPlugin {
-                name: "a", deps: &[],
+                name: "a",
+                deps: &[],
                 order: order.clone(),
             });
 
@@ -259,11 +272,13 @@ mod tests {
 
         let mgr = PluginManager::new()
             .add(TestPlugin {
-                name: "x", deps: &["y"],
+                name: "x",
+                deps: &["y"],
                 order: order.clone(),
             })
             .add(TestPlugin {
-                name: "y", deps: &["x"],
+                name: "y",
+                deps: &["x"],
                 order: order.clone(),
             });
 

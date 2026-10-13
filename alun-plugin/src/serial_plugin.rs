@@ -42,11 +42,13 @@
 //! }
 //! ```
 
-use std::sync::Arc;
-use async_trait::async_trait;
-use alun_core::{Plugin, Result as CoreResult};
 use alun_config::SerialConfig;
-use alun_utils::{SerialGenerator, SerialRule, MemorySerialBackend, CyclePeriod, IncrementStrategy};
+use alun_core::{Plugin, Result as CoreResult};
+use alun_utils::{
+    CyclePeriod, IncrementStrategy, MemorySerialBackend, SerialGenerator, SerialRule,
+};
+use async_trait::async_trait;
+use std::sync::Arc;
 use tracing::info;
 
 /// 单号生成器插件
@@ -99,7 +101,9 @@ impl SerialPlugin {
     ///
     /// 插件未启动时调用会 panic。
     pub fn generator(&self) -> Arc<dyn SerialGenerator> {
-        self.generator.read().clone()
+        self.generator
+            .read()
+            .clone()
             .expect("SerialPlugin 尚未启动，请确保插件已注册并启动")
     }
 
@@ -130,29 +134,32 @@ impl SerialPlugin {
 
 #[async_trait]
 impl Plugin for SerialPlugin {
-    fn name(&self) -> &str { "serial" }
+    fn name(&self) -> &str {
+        "serial"
+    }
 
     async fn start(&self) -> CoreResult<()> {
         // 使用预注入的生成器，否则默认 memory
-        let gen = self.preset_generator.clone()
-            .unwrap_or_else(|| {
-                info!("单号生成器使用 memory 后端（默认）");
-                Arc::new(MemorySerialBackend::new())
-            });
+        let backend = self.preset_generator.clone().unwrap_or_else(|| {
+            info!("单号生成器使用 memory 后端（默认）");
+            Arc::new(MemorySerialBackend::new())
+        });
 
         // 注册配置文件中定义的静态规则
         for rc in &self.config.rules {
             let rule = Self::convert_rule(rc);
-            gen.register_rule(rule.clone()).await
-                .map_err(|e| alun_core::Error::Msg(
-                    format!("注册单号规则 '{}' 失败: {}", rule.key, e)
-                ))?;
+            backend.register_rule(rule.clone()).await.map_err(|e| {
+                alun_core::Error::Msg(format!("注册单号规则 '{}' 失败: {}", rule.key, e))
+            })?;
             info!("单号规则已注册: key={}, format={}", rule.key, rule.format);
         }
 
-        *self.generator.write() = Some(gen);
+        *self.generator.write() = Some(backend);
         let rule_count = self.config.rules.len();
-        info!("单号生成器就绪，后端={}, 规则数={}", self.config.backend, rule_count);
+        info!(
+            "单号生成器就绪，后端={}, 规则数={}",
+            self.config.backend, rule_count
+        );
         Ok(())
     }
 

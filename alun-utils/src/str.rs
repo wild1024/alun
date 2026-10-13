@@ -15,18 +15,28 @@ pub trait StrExt {
     /// 生成指定长度的随机字母数字串
     fn random(len: usize) -> String;
     /// 非空白字符（`is_blank` 的取反）
-    fn has_text(&self) -> bool { !self.is_blank() }
+    fn has_text(&self) -> bool {
+        !self.is_blank()
+    }
 }
 
 impl StrExt for str {
-    fn is_blank(&self) -> bool { self.trim().is_empty() }
+    fn is_blank(&self) -> bool {
+        self.trim().is_empty()
+    }
 
     fn to_camel(&self) -> String {
         self.split('_')
             .enumerate()
             .map(|(i, w)| {
-                if i == 0 { w.to_lowercase() }
-                else { let mut c = w.chars(); c.next().map(|x| x.to_uppercase().chain(c).collect()).unwrap_or_default() }
+                if i == 0 {
+                    w.to_lowercase()
+                } else {
+                    let mut c = w.chars();
+                    c.next()
+                        .map(|x| x.to_uppercase().chain(c).collect())
+                        .unwrap_or_default()
+                }
             })
             .collect()
     }
@@ -43,15 +53,20 @@ impl StrExt for str {
     }
 
     fn truncate(&self, max: usize) -> String {
-        if self.len() <= max { self.to_string() }
-        else { format!("{}...", &self[..max]) }
+        if self.len() <= max {
+            self.to_string()
+        } else {
+            format!("{}...", &self[..max])
+        }
     }
 
     fn random(len: usize) -> String {
-        use rand::Rng;
+        use rand::RngExt;
         const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-        let mut rng = rand::thread_rng();
-        (0..len).map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char).collect()
+        let mut rng = rand::rng();
+        (0..len)
+            .map(|_| CHARSET[rng.random_range(0..CHARSET.len())] as char)
+            .collect()
     }
 }
 
@@ -135,8 +150,8 @@ impl InputCleaner {
 
 /// 生成邀请码 —— 12 位随机字母数字串
 pub fn generate_invite_code() -> String {
-    use rand::{Rng, distributions::Alphanumeric};
-    rand::thread_rng()
+    use rand::{RngExt, distr::Alphanumeric};
+    rand::rng()
         .sample_iter(&Alphanumeric)
         .take(12)
         .map(char::from)
@@ -160,10 +175,10 @@ pub fn generate_random_digits(n: usize) -> String {
     if n == 0 {
         return String::new();
     }
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
+    use rand::RngExt;
+    let mut rng = rand::rng();
     (0..n)
-        .map(|_| (rng.gen_range(1..=9) + b'0') as char)
+        .map(|_| (rng.random_range(1..=9) + b'0') as char)
         .collect()
 }
 
@@ -184,11 +199,11 @@ pub fn generate_random_alphanum(length: usize) -> String {
     const CHARSET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ\
                               abcdefghjkmnpqrstuvwxyz\
                               123456789";
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
+    use rand::RngExt;
+    let mut rng = rand::rng();
     let mut result = String::with_capacity(length);
     for _ in 0..length {
-        let idx = rng.gen_range(0..CHARSET.len());
+        let idx = rng.random_range(0..CHARSET.len());
         result.push(CHARSET[idx] as char);
     }
     result
@@ -199,9 +214,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_camel() { assert_eq!("user_name".to_camel(), "userName"); }
+    fn test_camel() {
+        assert_eq!("user_name".to_camel(), "userName");
+    }
     #[test]
-    fn test_snake() { assert_eq!("UserName".to_snake(), "user_name"); }
+    fn test_snake() {
+        assert_eq!("UserName".to_snake(), "user_name");
+    }
     #[test]
-    fn test_blank() { assert!("  ".is_blank()); assert!(!"abc".is_blank()); }
+    fn test_blank() {
+        assert!("  ".is_blank());
+        assert!(!"abc".is_blank());
+    }
 }

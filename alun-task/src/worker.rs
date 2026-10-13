@@ -1,20 +1,20 @@
 //! 任务消费者 —— 从 Kafka 消费任务并分发给 Handler 执行
 
-use std::sync::Arc;
-use std::time::Instant;
-use rdkafka::consumer::{StreamConsumer, Consumer};
 use rdkafka::ClientConfig;
+use rdkafka::Message;
+use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::BorrowedMessage;
 use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::Message;
+use std::sync::Arc;
+use std::time::Instant;
 use tokio::time::timeout;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
-use crate::storage::TaskStorage;
 use crate::HandlerRegistry;
-use crate::types::*;
 use crate::TaskMetrics;
 use crate::metrics::AtomicInc;
+use crate::storage::TaskStorage;
+use crate::types::*;
 
 /// 任务执行器
 ///
@@ -107,7 +107,8 @@ impl TaskWorker {
 
     /// 停止消费循环
     pub fn stop(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.running
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 处理单条 Kafka 消息：反序列化、查找 handler、执行、更新状态
@@ -145,7 +146,11 @@ impl TaskWorker {
             }
         };
 
-        if let Err(e) = self.storage.update_task_status(&task_msg.task_id, TaskStatus::Processing).await {
+        if let Err(e) = self
+            .storage
+            .update_task_status(&task_msg.task_id, TaskStatus::Processing)
+            .await
+        {
             error!(task_id = %task_msg.task_id, error = %e, "update_task_status(Processing) 失败");
         }
 
@@ -172,7 +177,7 @@ impl TaskWorker {
                 self.handle_success(&task_msg, &output, elapsed_ms).await;
             }
             Err(e) => {
-                self.handle_failure(&task_msg, &e, &config, elapsed_ms).await;
+                self.handle_failure(&task_msg, &e, config, elapsed_ms).await;
             }
         }
 
@@ -181,7 +186,10 @@ impl TaskWorker {
 
     /// 异步提交 Kafka 消息 offset
     async fn commit_offset(&self, msg: &BorrowedMessage<'_>) {
-        if let Err(e) = self.consumer.commit_message(msg, rdkafka::consumer::CommitMode::Async) {
+        if let Err(e) = self
+            .consumer
+            .commit_message(msg, rdkafka::consumer::CommitMode::Async)
+        {
             error!(error = %e, "Kafka offset 提交失败");
         }
     }
@@ -204,13 +212,21 @@ impl TaskWorker {
 
     /// 处理任务执行成功：更新状态为 Completed、存储结果、记录执行日志
     async fn handle_success(&self, msg: &TaskMessage, output: &serde_json::Value, elapsed_ms: i64) {
-        if let Err(e) = self.storage.update_task_status(&msg.task_id, TaskStatus::Completed).await {
+        if let Err(e) = self
+            .storage
+            .update_task_status(&msg.task_id, TaskStatus::Completed)
+            .await
+        {
             error!(task_id = %msg.task_id, error = %e, "update_task_status(Completed) 失败");
         }
         if let Err(e) = self.storage.save_task_result(&msg.task_id, output).await {
             error!(task_id = %msg.task_id, error = %e, "save_task_result 失败");
         }
-        if let Err(e) = self.storage.log_execution(&msg.task_id, TaskStatus::Completed, None, elapsed_ms).await {
+        if let Err(e) = self
+            .storage
+            .log_execution(&msg.task_id, TaskStatus::Completed, None, elapsed_ms)
+            .await
+        {
             error!(task_id = %msg.task_id, error = %e, "log_execution 失败");
         }
         self.metrics.completed.inc();
@@ -227,7 +243,11 @@ impl TaskWorker {
     ) {
         self.metrics.failed.inc();
 
-        let current_retries = self.storage.get_retry_count(&msg.task_id).await.unwrap_or(0);
+        let current_retries = self
+            .storage
+            .get_retry_count(&msg.task_id)
+            .await
+            .unwrap_or(0);
         let attempt = current_retries + 1;
 
         if attempt as u32 > config.max_retries {
@@ -236,29 +256,49 @@ impl TaskWorker {
                 if let Err(e) = self.send_to_dlq(msg, dlq_topic, err_msg).await {
                     error!(task_id = %msg.task_id, error = %e, "send_to_dlq 失败");
                 }
-                if let Err(e) = self.storage.update_task_status(&msg.task_id, TaskStatus::DeadLetter).await {
+                if let Err(e) = self
+                    .storage
+                    .update_task_status(&msg.task_id, TaskStatus::DeadLetter)
+                    .await
+                {
                     error!(task_id = %msg.task_id, error = %e, "update_task_status(DeadLetter) 失败");
                 }
             } else {
                 warn!(task_id = %msg.task_id, attempt = attempt, "超过最大重试次数");
-                if let Err(e) = self.storage.update_task_status(&msg.task_id, TaskStatus::Failed).await {
+                if let Err(e) = self
+                    .storage
+                    .update_task_status(&msg.task_id, TaskStatus::Failed)
+                    .await
+                {
                     error!(task_id = %msg.task_id, error = %e, "update_task_status(Failed) 失败");
                 }
-                if let Err(e) = self.storage.save_task_result(
-                    &msg.task_id,
-                    &serde_json::json!({"error": err_msg, "retries": attempt}),
-                ).await {
+                if let Err(e) = self
+                    .storage
+                    .save_task_result(
+                        &msg.task_id,
+                        &serde_json::json!({"error": err_msg, "retries": attempt}),
+                    )
+                    .await
+                {
                     error!(task_id = %msg.task_id, error = %e, "save_task_result 失败");
                 }
             }
-            if let Err(e) = self.storage.log_execution(&msg.task_id, TaskStatus::Failed, Some(err_msg), elapsed_ms).await {
+            if let Err(e) = self
+                .storage
+                .log_execution(&msg.task_id, TaskStatus::Failed, Some(err_msg), elapsed_ms)
+                .await
+            {
                 error!(task_id = %msg.task_id, error = %e, "log_execution 失败");
             }
         } else {
             if let Err(e) = self.storage.update_retry(&msg.task_id, attempt).await {
                 error!(task_id = %msg.task_id, error = %e, "update_retry 失败");
             }
-            if let Err(e) = self.storage.log_execution(&msg.task_id, TaskStatus::Failed, Some(err_msg), elapsed_ms).await {
+            if let Err(e) = self
+                .storage
+                .log_execution(&msg.task_id, TaskStatus::Failed, Some(err_msg), elapsed_ms)
+                .await
+            {
                 error!(task_id = %msg.task_id, error = %e, "log_execution 失败");
             }
             info!(task_id = %msg.task_id, attempt = attempt, "任务失败，等待重试: {}", err_msg);

@@ -3,7 +3,7 @@
 //! 参考 alun_task::types 的双层配置模型：
 //! - `BackendConfig` — 每种 backend_type 一份（类比 TaskConfig）
 //! - `FsPluginConfig` — 全局运行时配置（类比 TaskWorkerConfig）
-//! - `BackendEntry` — linkme 分布式切片条目（类比 TaskHandlerEntry）
+//! - `BackendEntry` — 编译期注册条目（类比 TaskHandlerEntry）
 
 use crate::backend::StorageBackend;
 
@@ -66,10 +66,18 @@ pub struct FsPluginConfig {
     pub presign_url_ttl_secs: u64,
 }
 
-fn default_backend_type() -> String { "local".into() }
-fn default_root_dir() -> String { "uploads".into() }
-fn default_max_size() -> u64 { 52_428_800 }
-fn default_presign_ttl() -> u64 { 3600 }
+fn default_backend_type() -> String {
+    "local".into()
+}
+fn default_root_dir() -> String {
+    "uploads".into()
+}
+fn default_max_size() -> u64 {
+    52_428_800
+}
+fn default_presign_ttl() -> u64 {
+    3600
+}
 
 impl Default for FsPluginConfig {
     fn default() -> Self {
@@ -84,8 +92,7 @@ impl Default for FsPluginConfig {
 
 /// 编译期后端注册条目
 ///
-/// 配合 `#[storage_backend]` 宏 + linkme 分布式切片使用。
-/// 业务项目通过宏注解声明后端，编译期自动收集到此切片。
+/// 业务项目通过 `inventory::submit!` 声明后端，编译期自动收集。
 ///
 /// 参考 alun_task::TaskHandlerEntry。
 #[derive(Debug, Clone)]
@@ -98,11 +105,15 @@ pub struct BackendEntry {
     pub config_fn: fn() -> BackendConfig,
 }
 
-/// 存储后端分布式切片
+inventory::collect!(BackendEntry);
+
+/// 遍历编译期注册的全部存储后端条目。
 ///
-/// `#[storage_backend]` 宏注解的后端实例在此汇集。
-/// 使用 linkme 在链接期自动收集，启动时通过 `BackendRegistry::from_discovered()` 一键注册。
+/// # 为什么用 `inventory` 而不是 `linkme`
 ///
-/// 参考 alun_task::TASK_HANDLERS。
-#[linkme::distributed_slice]
-pub static STORAGE_BACKENDS: [BackendEntry] = [..];
+/// `linkme::distributed_slice` 依赖链接器保留自定义段；在 `windows-gnu`
+/// 等工具链的 `--gc-sections` 下会被**整段回收**，切片长度为 0 且**链接无报错**。
+/// `inventory` 不依赖自定义段，任何工具链都成立。
+pub fn discovered_storage_backends() -> impl Iterator<Item = &'static BackendEntry> {
+    inventory::iter::<BackendEntry>.into_iter()
+}

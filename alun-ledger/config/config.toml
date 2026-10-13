@@ -1,0 +1,30 @@
+[app]
+name = "Alun Ledger"
+
+[server]
+listen = "127.0.0.1:8080"
+
+[database]
+enabled = true
+type = "sqlite"
+name = "./target/ledger_dev.db"
+max_connections = 5
+min_connections = 1
+connect_timeout = 5
+sql_logging = false
+slow_query_ms = 0
+
+[database.migration]
+enabled = false
+path = "migrations/common"
+
+[middleware]
+request_id = true
+request_log = false
+
+[middleware.auth]
+enabled = true
+jwt_secret = "alun-ledger-dev-secret-please-change-me"
+access_token_expire_secs = 7200
+refresh_token_expire_secs = 604800
+ignore_paths = ["/health", "/api/auth/login"]

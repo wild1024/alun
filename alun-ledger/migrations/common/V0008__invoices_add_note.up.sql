@@ -1,0 +1,1 @@
+ALTER TABLE invoices ADD COLUMN note VARCHAR(255)

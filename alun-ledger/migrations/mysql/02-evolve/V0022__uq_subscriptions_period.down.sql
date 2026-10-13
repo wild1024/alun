@@ -1,0 +1,1 @@
+DROP INDEX uq_subscriptions_period ON subscriptions

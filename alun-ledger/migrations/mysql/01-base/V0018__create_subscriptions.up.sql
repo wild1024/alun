@@ -1,0 +1,1 @@
+CREATE TABLE subscriptions (id BIGINT NOT NULL PRIMARY KEY, tenant_id BIGINT NOT NULL, customer_id BIGINT NOT NULL, plan VARCHAR(32) NOT NULL, period_start DATETIME(6) NOT NULL, period_end DATETIME(6) NOT NULL, status VARCHAR(16) NOT NULL)

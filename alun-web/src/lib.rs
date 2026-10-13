@@ -1,37 +1,81 @@
 //! Alun web layer: 路由、中间件、提取器、响应、全局资源
 
 pub mod app;
-pub mod router;
-pub mod middleware;
-pub mod jwt;
-pub mod response;
+/// 统一出口：响应体、API 错误、分页参数、错误码，以及「下层错误 → HTTP 语义」的映射
+pub mod api;
+#[cfg(feature = "db")]
+pub mod db_url;
 pub mod extract;
+pub mod jwt;
+pub mod middleware;
+/// F10 可观测性：HTTP 自动埋点 +（可选）Prometheus 导出端点
+#[cfg(feature = "metrics")]
+pub mod metrics;
+#[cfg(feature = "db")]
+pub mod page;
+pub mod plugin;
+
+// Web 插件（F5）：插件作为单一扩展单元，贡献生命周期 + 路由 + 权限 + 免鉴权
+pub use crate::plugin::WebPlugin;
 pub mod resources;
+pub mod response;
+pub mod router;
+#[cfg(feature = "sse")]
+pub mod sse;
 
 pub use app::App;
-pub use router::AlunRouter;
-pub use response::{Res, ResResult, ApiError, PageData};
-pub use middleware::{UserId, AuthClaims, AuthLayer, RequireRoleLayer, RequirePermissionLayer, TokenClaims, TokenType};
-pub use jwt::JWT;
-pub use extract::ValidatedJson;
-pub use extract::{validate_uuid, validate_mobile, validate_password_strength, validate_id_card, validate_date, validate_email, validate_url, validate_datetime, validate_date_or_datetime};
 pub use extract::ValidateExt;
+pub use extract::ValidatedJson;
+pub use extract::{
+    validate_date, validate_date_or_datetime, validate_datetime, validate_email, validate_id_card,
+    validate_mobile, validate_password_strength, validate_url, validate_uuid,
+};
+pub use jwt::JWT;
+pub use middleware::{
+    AuthClaims, AuthLayer, ClaimsBuilder, Principal, RequirePermissionLayer, RequireRoleLayer,
+    TokenClaims, TokenType, UserId,
+};
+pub use api::{
+    DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, ApiError, PageData, PageQuery, Res, ResResult, SortOrder,
+    SortQuery, codes,
+};
+pub use response::ApiBody;
+pub use router::AlunRouter;
 
 #[cfg(feature = "db")]
-pub use crate::resources::{db, try_db, set_db};
+pub use crate::page::PageResponseExt;
 #[cfg(feature = "cache")]
-pub use crate::resources::{cache, try_cache, set_cache};
-pub use crate::resources::{cfg, config, try_config, set_config};
-#[cfg(feature = "template")]
-pub use crate::resources::{render_template, try_template, set_template};
+pub use crate::resources::{cache, set_cache, try_cache};
+#[cfg(all(feature = "cache", feature = "db"))]
+pub use crate::resources::cache_tenant;
+pub use crate::resources::{cfg, config, set_config, try_config};
+#[cfg(feature = "db")]
+pub use crate::resources::{db, set_db, try_db};
+#[cfg(feature = "db")]
+pub use crate::resources::{db_named, set_db_named, try_db_named};
 pub use crate::resources::{
-    set_upload_path, upload_path, try_upload_path,
-    set_download_path, download_path, try_download_path,
+    download_path, set_download_path, set_upload_path, try_download_path, try_upload_path,
+    upload_path,
 };
+#[cfg(feature = "template")]
+pub use crate::resources::{render_template, set_template, try_template};
 
-/// 路由注册分布式切片 —— `#[get]`、`#[post]` 等宏注解的处理器在此汇集
-#[linkme::distributed_slice]
-pub static ROUTES: [fn(&mut AlunRouter)] = [..];
+/// 路由注册项 —— `#[alun::get]` / `#[alun::post]` … 宏在**编译期**提交，
+/// [`App::scan`](crate::App::scan) 在装配阶段收集。
+///
+/// # 为什么用 `inventory` 而不是 `linkme`
+///
+/// `linkme::distributed_slice` 依赖链接器把自定义段完整保留。在
+/// `x86_64-pc-windows-gnu`（mingw `ld` 默认 `--gc-sections`）下，未被常规符号
+/// 引用的段会被**整段回收**，于是切片长度为 0：所有路由消失（请求全部 404）、
+/// 权限层不挂载，且**编译与链接均无报错**（F19）。
+///
+/// `inventory` 不依赖自定义段，任何工具链都成立，因此**无需**
+/// `.cargo/config.toml` 里的 `-Wl,--no-gc-sections` 全局兜底。
+#[derive(Debug, Clone, Copy)]
+pub struct RouteEntry(pub fn(&mut AlunRouter));
+
+inventory::collect!(RouteEntry);
 
 /// 路径权限定义 —— 由 `#[permission("xxx")]` 宏注解生成
 ///
@@ -47,9 +91,7 @@ pub struct PermissionDef {
     pub permission: &'static str,
 }
 
-/// 路径权限分布式切片 —— `#[permission]` 宏注解的权限规则在此汇集
-#[linkme::distributed_slice]
-pub static PERMISSION_ROUTES: [PermissionDef] = [..];
+inventory::collect!(PermissionDef);
 
 /// 无需认证的路径定义 —— 由 `#[no_auth]` 宏注解生成
 ///
@@ -60,6 +102,22 @@ pub struct NoAuthDef {
     pub path: &'static str,
 }
 
-/// 无需认证路径分布式切片 —— `#[no_auth]` 宏注解的路径在此汇集
-#[linkme::distributed_slice]
-pub static NO_AUTH_ROUTES: [NoAuthDef] = [..];
+inventory::collect!(NoAuthDef);
+
+/// 遍历编译期注册的全部路由注册项（由 `#[alun::get]` 等宏提交）。
+pub fn discovered_routes() -> impl Iterator<Item = fn(&mut AlunRouter)> {
+    inventory::iter::<RouteEntry>.into_iter().map(|entry| entry.0)
+}
+
+/// 收集编译期注册的全部权限规则（由 `#[alun::permission]` 宏提交）。
+pub fn discovered_permissions() -> Vec<PermissionDef> {
+    inventory::iter::<PermissionDef>
+        .into_iter()
+        .cloned()
+        .collect()
+}
+
+/// 收集编译期注册的全部免认证路径（由 `#[alun::no_auth]` 宏提交）。
+pub fn discovered_no_auth() -> Vec<NoAuthDef> {
+    inventory::iter::<NoAuthDef>.into_iter().cloned().collect()
+}

@@ -1,17 +1,13 @@
 //! 路径权限校验中间件（配置 + 宏注解联合校验）
 
-use axum::{
-    extract::Request,
-    response::Response,
-    body::Body,
-};
+use super::AuthClaims;
+use crate::response::Res;
 use axum::http::StatusCode;
+use axum::{body::Body, extract::Request, response::Response};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
-use crate::response::Res;
-use super::AuthClaims;
 
 /// 将路径按 `/` 分段，逐段比对。`{param}` 占位符匹配任意非空段。
 fn match_path(request_path: &str, rule_path: &str) -> bool {
@@ -59,11 +55,14 @@ impl PermissionCheckLayer {
     /// 从配置文件规则创建
     pub fn from_config(config_rules: &[alun_config::PermissionRule]) -> Self {
         Self {
-            rules: config_rules.iter().map(|r| PermissionRule {
-                path: r.path.clone(),
-                methods: r.methods.clone(),
-                permission: r.permission.clone(),
-            }).collect(),
+            rules: config_rules
+                .iter()
+                .map(|r| PermissionRule {
+                    path: r.path.clone(),
+                    methods: r.methods.clone(),
+                    permission: r.permission.clone(),
+                })
+                .collect(),
         }
     }
 
@@ -136,14 +135,17 @@ where
                     Some(AuthClaims(claims)) => {
                         tracing::debug!(
                             "权限检查: path={}, required={}, user_perms={:?}",
-                            path, required_perm, claims.permissions
+                            path,
+                            required_perm,
+                            claims.permissions
                         );
                         claims.has_permission(&required_perm)
                     }
                     None => {
                         tracing::warn!(
                             "权限检查: path={}, required={}, AuthClaims 未注入 (auth 中间件未执行或配置有误)",
-                            path, required_perm
+                            path,
+                            required_perm
                         );
                         false
                     }
@@ -155,8 +157,11 @@ where
                 } else {
                     let body = serde_json::to_string(&Res::<()>::fail(
                         StatusCode::FORBIDDEN.as_u16() as i32,
-                        &format!("无权限访问，需要权限: {}", required_perm),
-                    )).unwrap_or_else(|_| r#"{"code":403,"msg":"无权限访问，需要权限: xxx"}"#.to_string());
+                        format!("无权限访问，需要权限: {}", required_perm),
+                    ))
+                    .unwrap_or_else(|_| {
+                        r#"{"code":403,"msg":"无权限访问，需要权限: xxx"}"#.to_string()
+                    });
                     let resp = Response::builder()
                         .status(StatusCode::FORBIDDEN)
                         .header("Content-Type", "application/json; charset=utf-8")

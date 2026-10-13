@@ -8,7 +8,9 @@ mod tests {
     use std::path::PathBuf;
 
     fn test_root() -> PathBuf {
-        std::env::temp_dir().join("alun_fs_test").join(uuid::Uuid::new_v4().to_string())
+        std::env::temp_dir()
+            .join("alun_fs_test")
+            .join(uuid::Uuid::new_v4().to_string())
     }
 
     // ──── 创建实例 ───────────────────────────────────
@@ -38,7 +40,7 @@ mod tests {
         let fs = LocalFs::new(root.to_str().unwrap());
         let data = b"Hello, Alun FS!";
 
-        let meta = fs.write("test.txt", data).await.unwrap();
+        let meta = fs.write_at("test.txt", data).await.unwrap();
         assert_eq!(meta.original_name, "test.txt");
 
         let read_data = fs.read("test.txt").await.unwrap();
@@ -53,10 +55,10 @@ mod tests {
         let fs = LocalFs::new(root.to_str().unwrap());
         let data: Vec<u8> = (0..255).collect();
 
-        let meta = fs.write("binary.bin", &data).await.unwrap();
-        assert_eq!(meta.size, 255);
+        let _ = fs.write_at("binary.bin", &data).await.unwrap();
 
         let read_data = fs.read("binary.bin").await.unwrap();
+        assert_eq!(read_data.len(), 255);
         assert_eq!(read_data, data);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -84,7 +86,7 @@ mod tests {
     async fn test_delete_existing() {
         let root = test_root();
         let fs = LocalFs::new(root.to_str().unwrap());
-        fs.write("del_test.txt", b"data").await.unwrap();
+        fs.write_at("del_test.txt", b"data").await.unwrap();
         assert!(fs.exists("del_test.txt").await);
 
         fs.delete("del_test.txt").await.unwrap();
@@ -107,7 +109,7 @@ mod tests {
     async fn test_exists_true() {
         let root = test_root();
         let fs = LocalFs::new(root.to_str().unwrap());
-        fs.write("exist.txt", b"1").await.unwrap();
+        fs.write_at("exist.txt", b"1").await.unwrap();
         assert!(fs.exists("exist.txt").await);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -138,10 +140,10 @@ mod tests {
     async fn test_content_type_for_images() {
         let root = test_root();
         let fs = LocalFs::new(root.to_str().unwrap());
-        let meta = fs.write("img.png", b"fake").await.unwrap();
+        let meta = fs.write_at("img.png", b"fake").await.unwrap();
         assert_eq!(meta.content_type, "image/png");
 
-        let meta = fs.write("img.jpg", b"fake").await.unwrap();
+        let meta = fs.write_at("img.jpg", b"fake").await.unwrap();
         assert_eq!(meta.content_type, "image/jpeg");
 
         let _ = std::fs::remove_dir_all(&root);

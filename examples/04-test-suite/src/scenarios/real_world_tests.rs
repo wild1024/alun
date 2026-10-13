@@ -9,21 +9,22 @@
 
 #[cfg(test)]
 mod tests {
-    use alun_web::router::AlunRouter;
-    use alun_web::middleware::{TokenClaims, AuthClaims, AuthLayer};
-    use alun_web::jwt::JWT;
+    use alun_cache::{Cache, LocalCache};
     use alun_config::{AppConfig, ConfigManager};
-    use alun_core::api::{Res, ApiError, PageQuery};
-    use alun_cache::{LocalCache, Cache};
-    use alun_db::{Row, Db};
+    use alun_web::api::{ApiError, PageData, PageQuery, Res};
+    use alun_db::{Db, Row};
+    use alun_web::PageResponseExt;
+    use alun_web::jwt::JWT;
+    use alun_web::middleware::{AuthClaims, AuthLayer, TokenClaims};
+    use alun_web::router::AlunRouter;
+    use axum::Extension;
     use axum::Router;
-    use axum::http::{StatusCode, Request};
     use axum::body::{Body, to_bytes};
     use axum::extract::{Path, Query};
-    use axum::Extension;
-    use tower::ServiceExt;
+    use axum::http::{Request, StatusCode};
+    use serde::{Deserialize, Serialize};
     use std::sync::Arc;
-    use serde::{Serialize, Deserialize};
+    use tower::ServiceExt;
 
     // ──── DTO 定义 ───────────────────────────────────
 
@@ -78,39 +79,36 @@ mod tests {
     // ──── 模拟数据库 + JWT + 缓存初始化 ──────────────
 
     async fn setup_sqlite_db() -> Db {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-
-        sqlx::query(
+        let db = Db::connect("sqlite://:memory:").await.unwrap();
+        db.execute(
             "CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 email TEXT NOT NULL,
                 roles TEXT NOT NULL DEFAULT '[]'
-            )"
+            )",
         )
-        .execute(&pool)
         .await
         .unwrap();
-
-        sqlx::query(
+        db.execute(
             "CREATE TABLE IF NOT EXISTS articles (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 content TEXT NOT NULL DEFAULT '',
                 author_id TEXT NOT NULL
-            )"
+            )",
         )
-        .execute(&pool)
         .await
         .unwrap();
-
-        Db::sqlite(pool)
+        db
     }
 
     fn create_app_config() -> AppConfig {
-        let mut cfg = AppConfig::default();
-        cfg.app_name = "TestApp".into();
+        let mut cfg = AppConfig {
+            app_name: "TestApp".into(),
+            ..Default::default()
+        };
         cfg.middleware.auth.enabled = true;
         cfg.middleware.auth.jwt_secret = "my-super-secret-jwt-key-32byte!".into();
         cfg.middleware.auth.access_token_expire_secs = 3600;
@@ -132,7 +130,7 @@ mod tests {
             dynamic: parking_lot::RwLock::new(std::collections::HashMap::new()),
         });
         let jwt = JWT::with_config(cm.clone());
-        let cache = LocalCache::new(1000, 0);
+        let cache = LocalCache::new("", 1000, 0);
 
         (cm, jwt, cache)
     }
@@ -152,32 +150,38 @@ mod tests {
         let password_hash = alun_utils::crypto::Crypto::hash_password(&req.password)
             .map_err(|e| ApiError::internal_masked("注册失败", e.to_string()))?;
 
-        let mut row = Row::table("users").id(user_id.clone());
-        row.set("username", req.username.as_str());
-        row.set("password_hash", password_hash.as_str());
-        row.set("email", req.email.as_str());
-        row.set("roles", "[]");
+        let mut row = Row::new().with_entity("users", "id");
+        row.insert("id", user_id.as_str());
+        row.insert("username", req.username.as_str());
+        row.insert("password_hash", password_hash.as_str());
+        row.insert("email", req.email.as_str());
+        row.insert("roles", "[]");
 
-        db.insert(&row).await
+        db.insert_row(&row)
+            .await
             .map_err(|e| ApiError::internal_masked("注册失败", e.to_string()))?;
 
-        let access_token = jwt.create_access_token(
-            &user_id, Some(&req.username), &[], &[],
-        ).map_err(|e| ApiError::internal_masked("Token 生成失败", e))?;
-
-        let refresh_token = jwt.create_refresh_token(&user_id)
+        let access_token = jwt
+            .create_access_token(&user_id, Some(&req.username), &[], &[])
             .map_err(|e| ApiError::internal_masked("Token 生成失败", e))?;
 
-        Ok(Res::ok_with_msg(LoginRes {
-            access_token,
-            refresh_token,
-            user: UserRes {
-                id: user_id,
-                username: req.username,
-                email: req.email,
-                roles: vec![],
+        let refresh_token = jwt
+            .create_refresh_token(&user_id)
+            .map_err(|e| ApiError::internal_masked("Token 生成失败", e))?;
+
+        Ok(Res::ok_with_msg(
+            LoginRes {
+                access_token,
+                refresh_token,
+                user: UserRes {
+                    id: user_id,
+                    username: req.username,
+                    email: req.email,
+                    roles: vec![],
+                },
             },
-        }, "注册成功"))
+            "注册成功",
+        ))
     }
 
     async fn login_user(
@@ -185,14 +189,21 @@ mod tests {
         Extension(db): Extension<Db>,
         Extension(jwt): Extension<Arc<JWT>>,
     ) -> Result<Res<LoginRes>, ApiError> {
-        let rows = db.query(
-            "SELECT * FROM users WHERE username = $1",
-            &[&req.username],
-        ).await.map_err(|e| ApiError::internal_masked("查询失败", e.to_string()))?;
+        let rows = db
+            .find_with_params(
+                "SELECT * FROM users WHERE username = ?",
+                vec![req.username.clone().into()],
+            )
+            .await
+            .map_err(|e| ApiError::internal_masked("查询失败", e.to_string()))?;
 
-        let row = rows.first().ok_or_else(|| ApiError::unauthorized("用户名或密码错误"))?;
+        let row = rows
+            .first()
+            .ok_or_else(|| ApiError::unauthorized("用户名或密码错误"))?;
 
-        let stored_hash: String = row.get_as("password_hash")
+        let stored_hash: String = row
+            .get_typed::<String>("password_hash")
+            .ok()
             .ok_or_else(|| ApiError::internal("数据异常"))?;
 
         let valid = alun_utils::crypto::Crypto::verify_password(&req.password, &stored_hash)
@@ -202,26 +213,35 @@ mod tests {
             return Err(ApiError::unauthorized("用户名或密码错误"));
         }
 
-        let user_id: String = row.get_as("id").unwrap_or_default();
-        let email: String = row.get_as("email").unwrap_or_default();
+        let user_id: String = row.get_typed::<String>("id").unwrap_or_default();
+        let email: String = row.get_typed::<String>("email").unwrap_or_default();
 
-        let access_token = jwt.create_access_token(
-            &user_id, Some(&req.username), &["user".into()], &["article:read".into(), "article:write".into()],
-        ).map_err(|e| ApiError::internal_masked("Token 生成失败", e))?;
-
-        let refresh_token = jwt.create_refresh_token(&user_id)
+        let access_token = jwt
+            .create_access_token(
+                &user_id,
+                Some(&req.username),
+                &["user".into()],
+                &["article:read".into(), "article:write".into()],
+            )
             .map_err(|e| ApiError::internal_masked("Token 生成失败", e))?;
 
-        Ok(Res::ok_with_msg(LoginRes {
-            access_token,
-            refresh_token,
-            user: UserRes {
-                id: user_id,
-                username: req.username,
-                email,
-                roles: vec!["user".into()],
+        let refresh_token = jwt
+            .create_refresh_token(&user_id)
+            .map_err(|e| ApiError::internal_masked("Token 生成失败", e))?;
+
+        Ok(Res::ok_with_msg(
+            LoginRes {
+                access_token,
+                refresh_token,
+                user: UserRes {
+                    id: user_id,
+                    username: req.username,
+                    email,
+                    roles: vec!["user".into()],
+                },
             },
-        }, "登录成功"))
+            "登录成功",
+        ))
     }
 
     async fn get_current_user(
@@ -235,36 +255,42 @@ mod tests {
     async fn list_articles(
         Query(page_query): Query<PageQuery>,
         Extension(db): Extension<Db>,
-    ) -> Result<Res<Vec<ArticleRes>>, ApiError> {
-        let (rows, total) = db.query_page(
-            "SELECT * FROM articles ORDER BY id",
-            &[],
-            &page_query,
-        ).await.map_err(|e| ApiError::internal_masked("查询失败", e.to_string()))?;
+    ) -> Result<Res<PageData<Vec<ArticleRes>>>, ApiError> {
+        let page = db
+            .paginate(
+                "SELECT * FROM articles ORDER BY id",
+                page_query.page,
+                page_query.page_size,
+            )
+            .await
+            .map_err(|e| ApiError::internal_masked("查询失败", e.to_string()))?;
 
-        let articles: Vec<ArticleRes> = rows.iter().map(|r| ArticleRes {
-            id: r.get_as::<String>("id").unwrap_or_default(),
-            title: r.get_as::<String>("title").unwrap_or_default(),
-            content: r.get_as::<String>("content").unwrap_or_default(),
-            author_id: r.get_as::<String>("author_id").unwrap_or_default(),
-        }).collect();
+        // Page<Row> → Page<ArticleRes> → 标准分页响应（保留 total / page / page_size）
+        let page = page.map(|r| ArticleRes {
+            id: r.get_typed::<String>("id").unwrap_or_default(),
+            title: r.get_typed::<String>("title").unwrap_or_default(),
+            content: r.get_typed::<String>("content").unwrap_or_default(),
+            author_id: r.get_typed::<String>("author_id").unwrap_or_default(),
+        });
 
-        Ok(Res::ok_with_msg(articles, format!("共 {} 条", total)))
+        Ok(page.into_res())
     }
 
     async fn get_article(
         Path(id): Path<String>,
         Extension(db): Extension<Db>,
     ) -> Result<Res<ArticleRes>, ApiError> {
-        let row = db.find_by_id("articles", id.as_str()).await
+        let row = db
+            .find_row_by_pk("articles", "id", id.as_str())
+            .await
             .map_err(|e| ApiError::internal_masked("查询失败", e.to_string()))?
             .ok_or_else(|| ApiError::not_found("文章不存在"))?;
 
         Ok(Res::ok(ArticleRes {
-            id: row.get_as("id").unwrap_or_default(),
-            title: row.get_as("title").unwrap_or_default(),
-            content: row.get_as("content").unwrap_or_default(),
-            author_id: row.get_as("author_id").unwrap_or_default(),
+            id: row.get_typed::<String>("id").unwrap_or_default(),
+            title: row.get_typed::<String>("title").unwrap_or_default(),
+            content: row.get_typed::<String>("content").unwrap_or_default(),
+            author_id: row.get_typed::<String>("author_id").unwrap_or_default(),
         }))
     }
 
@@ -275,20 +301,25 @@ mod tests {
     ) -> Result<Res<ArticleRes>, ApiError> {
         let article_id = uuid::Uuid::new_v4().to_string();
 
-        let mut row = Row::table("articles").id(article_id.clone());
-        row.set("title", req.title.as_str());
-        row.set("content", req.content.as_str());
-        row.set("author_id", claims.sub.as_str());
+        let mut row = Row::new().with_entity("articles", "id");
+        row.insert("id", article_id.as_str());
+        row.insert("title", req.title.as_str());
+        row.insert("content", req.content.as_str());
+        row.insert("author_id", claims.sub.as_str());
 
-        db.insert(&row).await
+        db.insert_row(&row)
+            .await
             .map_err(|e| ApiError::internal_masked("创建失败", e.to_string()))?;
 
-        Ok(Res::ok_with_msg(ArticleRes {
-            id: article_id,
-            title: req.title,
-            content: req.content,
-            author_id: claims.sub,
-        }, "创建成功"))
+        Ok(Res::ok_with_msg(
+            ArticleRes {
+                id: article_id,
+                title: req.title,
+                content: req.content,
+                author_id: claims.sub,
+            },
+            "创建成功",
+        ))
     }
 
     async fn update_article(
@@ -296,37 +327,49 @@ mod tests {
         axum::extract::Json(req): axum::extract::Json<UpdateArticleReq>,
         Extension(db): Extension<Db>,
     ) -> Result<Res<ArticleRes>, ApiError> {
-        let mut existing = db.find_by_id("articles", id.as_str()).await
+        let mut existing = db
+            .find_row_by_pk("articles", "id", id.as_str())
+            .await
             .map_err(|e| ApiError::internal_masked("查询失败", e.to_string()))?
             .ok_or_else(|| ApiError::not_found("文章不存在"))?;
 
         if let Some(ref title) = req.title {
-            existing.set("title", title.as_str());
+            existing.insert("title", title.as_str());
         }
         if let Some(ref content) = req.content {
-            existing.set("content", content.as_str());
+            existing.insert("content", content.as_str());
         }
 
-        let updated = db.update(&existing).await
-            .map_err(|e| ApiError::internal_masked("更新失败", e.to_string()))?
-            .ok_or_else(|| ApiError::not_found("文章不存在"))?;
+        db.update_row(&existing)
+            .await
+            .map_err(|e| ApiError::internal_masked("更新失败", e.to_string()))?;
 
-        Ok(Res::ok_with_msg(ArticleRes {
-            id: updated.get_as("id").unwrap_or_default(),
-            title: updated.get_as("title").unwrap_or_default(),
-            content: updated.get_as("content").unwrap_or_default(),
-            author_id: updated.get_as("author_id").unwrap_or_default(),
-        }, "更新成功"))
+        Ok(Res::ok_with_msg(
+            ArticleRes {
+                id: existing.get_typed::<String>("id").unwrap_or_default(),
+                title: existing.get_typed::<String>("title").unwrap_or_default(),
+                content: existing.get_typed::<String>("content").unwrap_or_default(),
+                author_id: existing
+                    .get_typed::<String>("author_id")
+                    .unwrap_or_default(),
+            },
+            "更新成功",
+        ))
     }
 
     async fn delete_article(
         Path(id): Path<String>,
         Extension(db): Extension<Db>,
     ) -> Result<Res<()>, ApiError> {
-        let deleted = db.delete_by_id("articles", id.as_str()).await
+        let affected = db
+            .execute_with_params(
+                "DELETE FROM articles WHERE id = ?",
+                vec![id.as_str().into()],
+            )
+            .await
             .map_err(|e| ApiError::internal_masked("删除失败", e.to_string()))?;
 
-        if deleted {
+        if affected > 0 {
             Ok(Res::ok_msg("删除成功"))
         } else {
             Err(ApiError::not_found("文章不存在"))
@@ -344,9 +387,14 @@ mod tests {
         // ─ 构建路由 ─
         let mut router = AlunRouter::new();
 
-        router.add_post("/api/auth/register", |state: Extension<Db>, j: Extension<Arc<JWT>>, body: axum::extract::Json<RegisterReq>| async move {
-            register_user(body, state, j).await
-        });
+        router.add_post(
+            "/api/auth/register",
+            |state: Extension<Db>,
+             j: Extension<Arc<JWT>>,
+             body: axum::extract::Json<RegisterReq>| async move {
+                register_user(body, state, j).await
+            },
+        );
         router.add_post("/api/auth/login", |state: Extension<Db>, j: Extension<Arc<JWT>>, body: axum::extract::Json<LoginReq>| async move {
             login_user(body, state, j).await
         });
@@ -356,10 +404,7 @@ mod tests {
 
         app = app.layer(AuthLayer {
             jwt_secret: cm.get().middleware.auth.jwt_secret.clone(),
-            ignore_paths: vec![
-                "/api/auth/register".into(),
-                "/api/auth/login".into(),
-            ],
+            ignore_paths: vec!["/api/auth/register".into(), "/api/auth/login".into()],
             cache: None,
         });
 
@@ -374,14 +419,15 @@ mod tests {
             "email": "test@example.com",
         });
 
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/api/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(register_body.to_string()))
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -403,14 +449,15 @@ mod tests {
             "password": "Test@123",
         });
 
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/api/auth/login")
                     .header("Content-Type", "application/json")
                     .body(Body::from(login_body.to_string()))
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -430,7 +477,7 @@ mod tests {
                     .uri("/api/auth/me")
                     .header("Authorization", format!("Bearer {}", access_token))
                     .body(Body::empty())
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -439,7 +486,7 @@ mod tests {
         let body_bytes = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["code"], 0);
-        assert!(body["data"]["sub"].as_str().unwrap().len() > 0);
+        assert!(!body["data"]["sub"].as_str().unwrap().is_empty());
     }
 
     // ──── 场景2：未认证访问受保护接口 → 401 ───────────
@@ -462,7 +509,12 @@ mod tests {
         let app = app.layer(axum::Extension(jwt));
 
         let resp = app
-            .oneshot(Request::builder().uri("/api/auth/me").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/auth/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -494,7 +546,7 @@ mod tests {
                     .uri("/api/auth/me")
                     .header("Authorization", "Bearer invalid-token-here")
                     .body(Body::empty())
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -507,9 +559,14 @@ mod tests {
     async fn build_crud_app(db: Db, cm: Arc<ConfigManager>, jwt: Arc<JWT>) -> Router {
         let mut router = AlunRouter::new();
 
-        router.add_post("/api/auth/register", |state: Extension<Db>, j: Extension<Arc<JWT>>, body: axum::extract::Json<RegisterReq>| async move {
-            register_user(body, state, j).await
-        });
+        router.add_post(
+            "/api/auth/register",
+            |state: Extension<Db>,
+             j: Extension<Arc<JWT>>,
+             body: axum::extract::Json<RegisterReq>| async move {
+                register_user(body, state, j).await
+            },
+        );
         router.add_post("/api/auth/login", |state: Extension<Db>, j: Extension<Arc<JWT>>, body: axum::extract::Json<LoginReq>| async move {
             login_user(body, state, j).await
         });
@@ -517,48 +574,54 @@ mod tests {
         router.add_get("/api/articles", |q: Query<PageQuery>, state: Extension<Db>| async move {
             list_articles(q, state).await
         });
-        router.add_post("/api/articles", |state: Extension<Db>, claims: Extension<AuthClaims>, body: axum::extract::Json<CreateArticleReq>| async move {
-            create_article(body, state, claims).await
-        });
-        router.add_get("/api/articles/{id}", |p: Path<String>, state: Extension<Db>| async move {
-            get_article(p, state).await
-        });
+        router.add_post(
+            "/api/articles",
+            |state: Extension<Db>,
+             claims: Extension<AuthClaims>,
+             body: axum::extract::Json<CreateArticleReq>| async move {
+                create_article(body, state, claims).await
+            },
+        );
+        router.add_get(
+            "/api/articles/{id}",
+            |p: Path<String>, state: Extension<Db>| async move { get_article(p, state).await },
+        );
         router.add_put("/api/articles/{id}", |p: Path<String>, state: Extension<Db>, body: axum::extract::Json<UpdateArticleReq>| async move {
             update_article(p, body, state).await
         });
-        router.add_delete("/api/articles/{id}", |p: Path<String>, state: Extension<Db>| async move {
-            delete_article(p, state).await
-        });
+        router.add_delete(
+            "/api/articles/{id}",
+            |p: Path<String>, state: Extension<Db>| async move { delete_article(p, state).await },
+        );
 
         let mut app: Router = router.into_axum();
 
         app = app.layer(AuthLayer {
             jwt_secret: cm.get().middleware.auth.jwt_secret.clone(),
-            ignore_paths: vec![
-                "/api/auth/register".into(),
-                "/api/auth/login".into(),
-            ],
+            ignore_paths: vec!["/api/auth/register".into(), "/api/auth/login".into()],
             cache: None,
         });
 
-        app
-            .layer(axum::Extension(jwt))
-            .layer(axum::Extension(db))
+        app.layer(axum::Extension(jwt)).layer(axum::Extension(db))
     }
 
     async fn register_and_login(app: &Router) -> String {
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/api/auth/register")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::json!({
-                        "username": "writer",
-                        "password": "Writer@123",
-                        "email": "writer@test.com",
-                    }).to_string()))
-                    .unwrap()
+                    .body(Body::from(
+                        serde_json::json!({
+                            "username": "writer",
+                            "password": "Writer@123",
+                            "email": "writer@test.com",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -583,7 +646,8 @@ mod tests {
             "content": "Hello, Alun!",
         });
 
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -591,7 +655,7 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::from(create_body.to_string()))
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -604,13 +668,14 @@ mod tests {
         assert_eq!(body["data"]["title"], "My First Article");
 
         // ─ 获取文章列表 ─
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri("/api/articles?page=1&page_size=10")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -619,16 +684,20 @@ mod tests {
         let body_bytes = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["code"], 0);
-        assert_eq!(body["data"].as_array().unwrap().len(), 1);
+        assert_eq!(body["data"]["list"].as_array().unwrap().len(), 1);
+        assert_eq!(body["data"]["total"], 1, "分页响应必须带 total");
+        assert_eq!(body["data"]["page"], 1);
+        assert_eq!(body["data"]["page_size"], 10);
 
         // ─ 确认文章存在（GET 单条） ─
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri(format!("/api/articles/{}", article_id))
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -645,12 +714,16 @@ mod tests {
                     .uri("/api/articles/nonexistent-id-9999")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "Non-existent article should return 404");
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "Non-existent article should return 404"
+        );
     }
 
     // ──── 场景5：分页查询多维测试 ─────────────────────
@@ -670,7 +743,8 @@ mod tests {
                 "title": format!("Article {}", i),
                 "content": format!("Content {}", i),
             });
-            let _ = app.clone()
+            let _ = app
+                .clone()
                 .oneshot(
                     Request::builder()
                         .method("POST")
@@ -678,26 +752,29 @@ mod tests {
                         .header("Content-Type", "application/json")
                         .header("Authorization", format!("Bearer {}", token))
                         .body(Body::from(body.to_string()))
-                        .unwrap()
+                        .unwrap(),
                 )
                 .await
                 .unwrap();
         }
 
         // ─ 第1页 × 10条 ─
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri("/api/articles?page=1&page_size=10")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
         let body_bytes = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(body["data"].as_array().unwrap().len(), 10);
+        assert_eq!(body["data"]["list"].as_array().unwrap().len(), 10);
+        assert_eq!(body["data"]["total"], 15);
+        assert_eq!(body["data"]["page"], 1);
 
         // ─ 第2页 × 10条 应该返回5条 ─
         let resp = app
@@ -706,26 +783,35 @@ mod tests {
                     .uri("/api/articles?page=2&page_size=10")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
         let body_bytes = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(body["data"].as_array().unwrap().len(), 5);
+        assert_eq!(body["data"]["list"].as_array().unwrap().len(), 5);
+        assert_eq!(body["data"]["page"], 2);
+        assert_eq!(body["data"]["page_size"], 10);
+        assert_eq!(body["data"]["total"], 15);
     }
 
     // ──── 场景6：缓存集成测试 ─────────────────────────
 
     #[tokio::test]
     async fn test_scenario_cache_integration() {
-        let cache = LocalCache::new(100, 0);
+        let cache = LocalCache::new("", 100, 0);
 
-        cache.set("app:name", &"Alun Test".to_string()).await.unwrap();
+        cache
+            .set("app:name", &"Alun Test".to_string())
+            .await
+            .unwrap();
         let val: Option<String> = cache.get("app:name").await.unwrap();
         assert_eq!(val, Some("Alun Test".into()));
 
-        cache.set_ex("temp:session", &"session-data".to_string(), 1).await.unwrap();
+        cache
+            .set_ex("temp:session", &"session-data".to_string(), 1)
+            .await
+            .unwrap();
         assert!(cache.exists("temp:session").await.unwrap());
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         assert!(!cache.exists("temp:session").await.unwrap());
@@ -743,13 +829,14 @@ mod tests {
         let token = register_and_login(&app).await;
 
         // ─ 404: 获取不存在的文章 ─
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri("/api/articles/nonexistent-id")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -758,20 +845,24 @@ mod tests {
 
         // ─ 422: 注册缺少必要字段 ─
         let bad_body = serde_json::json!({"username": ""});
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/api/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(bad_body.to_string()))
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY,
-            "Missing required fields should return 422");
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Missing required fields should return 422"
+        );
 
         // ─ 401: 不传 Token 创建文章 ─
         let resp = app
@@ -781,7 +872,7 @@ mod tests {
                     .uri("/api/articles")
                     .header("Content-Type", "application/json")
                     .body(Body::from("{}"))
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -800,9 +891,14 @@ mod tests {
         });
         let jwt = JWT::with_config(cm);
 
-        let access = jwt.create_access_token(
-            "user-x", Some("jane"), &["user".into()], &["read".into(), "write".into()],
-        ).unwrap();
+        let access = jwt
+            .create_access_token(
+                "user-x",
+                Some("jane"),
+                &["user".into()],
+                &["read".into(), "write".into()],
+            )
+            .unwrap();
 
         let refresh = jwt.create_refresh_token("user-x").unwrap();
 
@@ -836,7 +932,9 @@ mod tests {
                     "title": format!("Concurrent Article {}", i),
                     "content": "test",
                 });
-                let resp = app.as_ref().clone()
+                let resp = app
+                    .as_ref()
+                    .clone()
                     .oneshot(
                         Request::builder()
                             .method("POST")
@@ -844,7 +942,7 @@ mod tests {
                             .header("Content-Type", "application/json")
                             .header("Authorization", format!("Bearer {}", token))
                             .body(Body::from(body.to_string()))
-                            .unwrap()
+                            .unwrap(),
                     )
                     .await
                     .unwrap();

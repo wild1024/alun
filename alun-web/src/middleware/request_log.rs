@@ -2,10 +2,11 @@
 //!
 //! 记录请求路径、状态码、耗时，输出到 tracing（终端/文件/ELK）。
 //! 如需操作审计日志（含请求参数、响应体、脱敏、写库），
-//! 请通过 `App::with_middleware_hook` 注入项目级中间件。
+//! 请通过 `App::layer` / `App::layer_from_fn` 注入项目级中间件 ——
+//! 必须留在最外层，才能记到 401 / 403 / 429 与真实端到端耗时。
 
-use axum::{extract::Request, response::Response};
 use axum::extract::ConnectInfo;
+use axum::{extract::Request, response::Response};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -35,7 +36,9 @@ impl Default for RequestLogLayer {
 }
 
 impl RequestLogLayer {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn exclude_paths(mut self, paths: Vec<String>) -> Self {
         self.exclude_paths = paths;
@@ -84,9 +87,10 @@ where
         let method = req.method().clone();
         let path = req.uri().path().to_string();
         let connect_info = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned();
-        let req_id = req.headers()
+        let req_id = req
+            .headers()
             .iter()
-            .find(|(name, _)| name.as_str().to_ascii_lowercase() == "x-request-id")
+            .find(|(name, _)| name.as_str().eq_ignore_ascii_case("x-request-id"))
             .and_then(|(_, v)| v.to_str().ok())
             .unwrap_or("-")
             .to_string();
@@ -95,7 +99,8 @@ where
 
         let mut inner = self.inner.clone();
         let log_duration = self.log_duration;
-        let ip = req.headers()
+        let ip = req
+            .headers()
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
             .or_else(|| req.headers().get("x-real-ip").and_then(|v| v.to_str().ok()))
@@ -103,7 +108,9 @@ where
             .or_else(|| connect_info.map(|ci| ci.0.ip().to_string()));
         Box::pin(async move {
             let result = inner.call(req).await;
-            if !should_log { return result; }
+            if !should_log {
+                return result;
+            }
 
             let elapsed = start.elapsed();
             let duration_str = if log_duration {

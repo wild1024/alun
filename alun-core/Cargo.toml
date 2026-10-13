@@ -1,7 +1,7 @@
 [package]
 name = "alun-core"
-description = "Alun framework core: app lifecycle, plugin system, error handling, unified response types"
-version = "0.1.1"
+description = "Alun framework core: app lifecycle, plugin system, unified error (no HTTP / no database concepts)"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -22,8 +22,9 @@ anyhow = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-axum = { workspace = true, optional = true }
 
+# 刻意**没有任何 feature**：骨架层不认识 HTTP（那是 alun-web 的事），
+# 也不认识数据库（那是 alun-db-core 的事）。保持零可选依赖，
+# 非 Web / 非数据库的项目才能单独复用本 crate。
 [features]
 default = []
-web = ["axum"]

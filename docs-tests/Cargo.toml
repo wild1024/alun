@@ -1,0 +1,50 @@
+[package]
+name = "alun-docs-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "文档代码块编译校验（把仓库 Markdown 作为 doctest 真实编译）"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# 除 `lite` 外再开 sse / metrics / xlsx：README、docs/04 与 skill references 里有真实的
+# SSE 推送、Prometheus 埋点与 XLSX 导出示例。开着它们，这些示例才能作为 `no_run` 被
+# 真实编译校验；关掉的话只能降级成 `ignore`，文档与代码的对应关系就失去编译期保证。
+# 这三个都不需要 CMake（区别于 kafka / task-kafka）。
+# `lite` 按定义不含 `template`，而文档里的模板示例是 `no_run` 真编译块 ——
+# 门禁额外补开 `template`，否则那几块只能降级成 `ignore`。
+alun = { path = "../alun", features = ["lite", "template", "xss", "sse", "metrics", "xlsx",
+                                       "chrono", "rust_decimal"] }
+alun-core = { path = "../alun-core" }
+alun-web = { path = "../alun-web", features = ["sqlite", "cache", "template", "config"] }
+# 文档示例覆盖金额/时间/UUID/JSON 四类生态类型，需显式开启对应 feature，
+# 否则 README 里的 Model 示例无法通过 doctest 编译。
+# `sqlite` 亦需显式声明——`db` 只是数据库能力，不含驱动。
+alun-db = { path = "../alun-db", features = ["sqlite", "chrono", "rust_decimal", "uuid", "json"] }
+alun-db-core = { path = "../alun-db-core" }
+alun-utils = { path = "../alun-utils", features = ["validator-integration"] }
+alun-cache = { path = "../alun-cache" }
+alun-config = { path = "../alun-config" }
+alun-log = { path = "../alun-log" }
+alun-plugin = { path = "../alun-plugin" }
+# 不依赖 alun-kafka / 不开 alun-task 的 kafka：它们引入 rdkafka-sys，
+# 构建需要 CMake + C 工具链，会让整条文档编译链在本环境直接失败；
+# 而 alun-kafka 与 alun-task README 里的示例本来就标了 `ignore`，并不真需要这些 crate。
+alun-task = { path = "../alun-task" }
+alun-fs = { path = "../alun-fs" }
+alun-template = { path = "../alun-template" }
+alun-macros = { path = "../alun-macros" }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+validator = { version = "0.21", features = ["derive"] }
+async-trait = "0.1"
+chrono = "0.4"
+rust_decimal = "1.43"
+uuid = { version = "1", features = ["v4", "v7"] }
+tracing = "0.1"
+toml = "1.1"

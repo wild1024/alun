@@ -1,14 +1,14 @@
 //! 任务生产者 —— 提交任务到 Kafka 并委托给 TaskStorage 持久化
 
-use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
+use rdkafka::producer::{FutureProducer, FutureRecord};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
 
+use crate::HandlerRegistry;
 use crate::storage::TaskStorage;
 use crate::types::*;
-use crate::HandlerRegistry;
 
 const MSG_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -66,7 +66,7 @@ impl TaskProducer {
         let now = chrono::Utc::now().to_rfc3339();
 
         self.storage
-            .save_task_log(&task_id, params.task_type, priority, &config, &params)
+            .save_task_log(&task_id, params.task_type, priority, config, &params)
             .await
             .map_err(|e| format!("持久化 task_logs 失败: {}", e))?;
 
@@ -118,7 +118,11 @@ impl TaskProducer {
             }
         }
 
-        info!(succeeded = succeeded, failed = failures.len(), "批量提交完成");
+        info!(
+            succeeded = succeeded,
+            failed = failures.len(),
+            "批量提交完成"
+        );
         (succeeded, failures)
     }
 

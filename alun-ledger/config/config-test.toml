@@ -1,0 +1,13 @@
+# profile=test（ALUN_PROFILE=test 或 ALUN_ENV=test 时叠加到 config.toml）
+#
+# 注意合并语义（alun-config/src/lib.rs:836-933）：只有**非默认值**才覆盖——
+# sql_logging=false / slow_query_ms=0 等于没写；rate_limit 任一字段偏离默认即整体替换。
+
+[database]
+sql_logging = true
+slow_query_ms = 10
+
+[middleware.rate_limit]
+enabled = true
+requests_per_window = 100
+window_secs = 60

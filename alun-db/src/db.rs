@@ -1,775 +1,306 @@
-/// Db 门面 —— 统一数据库访问入口
-///
-/// 所有操作通过 Db 统一入口，内部按数据库类型分发。
+//! `Db` 门面。
 
-use sqlx::{PgPool, MySqlPool, SqlitePool, AnyPool, Column, Row as SqlxRow};
-use crate::{Row, DbResult, DbError, IdKind};
-use alun_core::PageQuery;
-use serde_json::{Value, Number};
+use alun_db_core::error::{DbError, Result};
+use alun_db_core::page::Page;
+use alun_db_core::row::Row;
+use alun_db_core::statement::{RawStmt, Statement};
+use alun_db_core::stmt::Value;
+use alun_db_core::traits::TypeMapper;
 
-/// 抽象数据库连接池 —— 统一封装四种后端连接池
-///
-/// 通过 `factory::create_db()` 根据配置自动选择对应的变体创建。
-#[derive(Clone)]
-pub enum DbPool {
-    /// PostgreSQL 连接池（`sqlx::PgPool`）
-    Postgres(PgPool),
-    /// MySQL 连接池（`sqlx::MySqlPool`）
-    Mysql(MySqlPool),
-    /// SQLite 连接池（`sqlx::SqlitePool`）
-    Sqlite(SqlitePool),
-    /// 运行时确定数据库类型的通用连接池（`sqlx::AnyPool`）
-    Any(AnyPool),
-}
+use crate::builder::{CountBuilder, FindBuilder, PageBuilder};
+use crate::config::DatabaseConfig;
+use crate::executor::RawExecutor;
+use crate::factory::create_driver;
+use crate::query::can_append_limit;
 
-/// Db 门面 —— 配置驱动的数据库访问入口
+/// 数据库门面。
 ///
-/// 封装 PostgreSQL/MySQL/SQLite 三种后端，提供统一的 CRUD 接口。
-/// 通过 `factory::create_db()` 从 `DatabaseConfig` 自动创建并连接测试。
-///
-/// # 示例
-///
-/// ```ignore
-/// let db = create_db(&config.database).await?;
-/// let user = db.find_by_id("user", 1).await?;
-/// ```
+/// `Clone` 共享底层连接池（`Arc`）：克隆体与原句柄复用同一批连接，
+/// 适合 axum state 等共享场景。
 #[derive(Clone)]
 pub struct Db {
-    /// 数据库连接池
-    pool: DbPool,
-}
-
-// ── 每个数据库类型的查询/写入实现宏 ──
-
-/// 为指定数据库类型生成后端查询/写入函数，包含列级 Row 转换
-macro_rules! impl_db_ops {
-    ($pool_ty:ty, $db_mod:ident) => {
-        paste::paste! {
-            fn [<typed_row_to_row_ $db_mod:snake>](
-                row: &<sqlx::$db_mod as sqlx::Database>::Row
-            ) -> Row {
-                use chrono::{DateTime, Utc, NaiveDate};
-
-                let mut r = Row::default();
-                for col in row.columns() {
-                    let name = col.name().to_string();
-                    let idx: usize = col.ordinal();
-                    if let Ok(v) = row.try_get::<i64, usize>(idx) {
-                        r.data.insert(name, Value::Number(v.into()));
-                    } else if let Ok(v) = row.try_get::<i32, usize>(idx) {
-                        r.data.insert(name, Value::Number((v as i64).into()));
-                    } else if let Ok(v) = row.try_get::<i16, usize>(idx) {
-                        r.data.insert(name, Value::Number((v as i64).into()));
-                    } else if let Ok(v) = row.try_get::<String, usize>(idx) {
-                        r.data.insert(name, Value::String(v));
-                    } else if let Ok(v) = row.try_get::<sqlx::types::Uuid, usize>(idx) {
-                        r.data.insert(name, Value::String(v.to_string()));
-                    } else if let Ok(v) = row.try_get::<DateTime<Utc>, usize>(idx) {
-                        r.data.insert(name, Value::String(v.to_rfc3339()));
-                    } else if let Ok(v) = row.try_get::<NaiveDate, usize>(idx) {
-                        r.data.insert(name, Value::String(v.format("%Y-%m-%d").to_string()));
-                    } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
-                        if let Some(n) = Number::from_f64(v) {
-                            r.data.insert(name, Value::Number(n));
-                        }
-                    } else if let Ok(v) = row.try_get::<sqlx::types::BigDecimal, usize>(idx) {
-                        let s = v.to_string();
-                        if let Ok(n) = s.parse::<serde_json::Number>() {
-                            r.data.insert(name, Value::Number(n));
-                        }
-                    } else if let Ok(v) = row.try_get::<bool, usize>(idx) {
-                        r.data.insert(name, Value::Bool(v));
-                    } else if let Ok(v) = row.try_get::<serde_json::Value, usize>(idx) {
-                        r.data.insert(name, v);
-                    }
-                }
-                r
-            }
-
-            async fn [<query_one_ $pool_ty:snake>](
-                pool: &$pool_ty, sql: &str, params: &[&str],
-            ) -> DbResult<Option<Row>> {
-                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
-                for p in params { q = q.bind(*p); }
-                Ok(q.fetch_optional(pool).await?.as_ref()
-                    .map([<typed_row_to_row_ $db_mod:snake>]))
-            }
-
-            async fn [<query_all_ $pool_ty:snake>](
-                pool: &$pool_ty, sql: &str, params: &[&str],
-            ) -> DbResult<Vec<Row>> {
-                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
-                for p in params { q = q.bind(*p); }
-                let rows = q.fetch_all(pool).await?;
-                Ok(rows.iter().map([<typed_row_to_row_ $db_mod:snake>]).collect())
-            }
-
-            async fn [<count_ $pool_ty:snake>](
-                pool: &$pool_ty, sql: &str, params: &[&str],
-            ) -> DbResult<u64> {
-                let mut q = sqlx::query_scalar::<sqlx::$db_mod, i64>(sql);
-                for p in params { q = q.bind(*p); }
-                Ok(q.fetch_optional(pool).await?.unwrap_or(0) as u64)
-            }
-
-            async fn [<execute_ $pool_ty:snake>](
-                pool: &$pool_ty, sql: &str, params: &[&str],
-            ) -> DbResult<u64> {
-                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
-                for p in params { q = q.bind(*p); }
-                q.execute(pool).await.map_err(DbError::from).map(|r| r.rows_affected())
-            }
-        }
-    };
-}
-
-/// 为不支持 BigDecimal 的数据库类型（SQLite）生成后端查询/写入函数
-macro_rules! impl_db_ops_no_bigdecimal {
-    ($pool_ty:ty, $db_mod:ident) => {
-        paste::paste! {
-            fn [<typed_row_to_row_ $db_mod:snake>](
-                row: &<sqlx::$db_mod as sqlx::Database>::Row
-            ) -> Row {
-                use chrono::{DateTime, Utc, NaiveDate};
-
-                let mut r = Row::default();
-                for col in row.columns() {
-                    let name = col.name().to_string();
-                    let idx: usize = col.ordinal();
-                    if let Ok(v) = row.try_get::<i64, usize>(idx) {
-                        r.data.insert(name, Value::Number(v.into()));
-                    } else if let Ok(v) = row.try_get::<i32, usize>(idx) {
-                        r.data.insert(name, Value::Number((v as i64).into()));
-                    } else if let Ok(v) = row.try_get::<i16, usize>(idx) {
-                        r.data.insert(name, Value::Number((v as i64).into()));
-                    } else if let Ok(v) = row.try_get::<String, usize>(idx) {
-                        r.data.insert(name, Value::String(v));
-                    } else if let Ok(v) = row.try_get::<sqlx::types::Uuid, usize>(idx) {
-                        r.data.insert(name, Value::String(v.to_string()));
-                    } else if let Ok(v) = row.try_get::<DateTime<Utc>, usize>(idx) {
-                        r.data.insert(name, Value::String(v.to_rfc3339()));
-                    } else if let Ok(v) = row.try_get::<NaiveDate, usize>(idx) {
-                        r.data.insert(name, Value::String(v.format("%Y-%m-%d").to_string()));
-                    } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
-                        if let Some(n) = Number::from_f64(v) {
-                            r.data.insert(name, Value::Number(n));
-                        }
-                    } else if let Ok(v) = row.try_get::<bool, usize>(idx) {
-                        r.data.insert(name, Value::Bool(v));
-                    } else if let Ok(v) = row.try_get::<serde_json::Value, usize>(idx) {
-                        r.data.insert(name, v);
-                    }
-                }
-                r
-            }
-
-            async fn [<query_one_ $pool_ty:snake>](
-                pool: &$pool_ty, sql: &str, params: &[&str],
-            ) -> DbResult<Option<Row>> {
-                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
-                for p in params { q = q.bind(*p); }
-                Ok(q.fetch_optional(pool).await?.as_ref()
-                    .map([<typed_row_to_row_ $db_mod:snake>]))
-            }
-
-            async fn [<query_all_ $pool_ty:snake>](
-                pool: &$pool_ty, sql: &str, params: &[&str],
-            ) -> DbResult<Vec<Row>> {
-                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
-                for p in params { q = q.bind(*p); }
-                let rows = q.fetch_all(pool).await?;
-                Ok(rows.iter().map([<typed_row_to_row_ $db_mod:snake>]).collect())
-            }
-
-            async fn [<count_ $pool_ty:snake>](
-                pool: &$pool_ty, sql: &str, params: &[&str],
-            ) -> DbResult<u64> {
-                let mut q = sqlx::query_scalar::<sqlx::$db_mod, i64>(sql);
-                for p in params { q = q.bind(*p); }
-                Ok(q.fetch_optional(pool).await?.unwrap_or(0) as u64)
-            }
-
-            async fn [<execute_ $pool_ty:snake>](
-                pool: &$pool_ty, sql: &str, params: &[&str],
-            ) -> DbResult<u64> {
-                let mut q = sqlx::query::<sqlx::$db_mod>(sql);
-                for p in params { q = q.bind(*p); }
-                q.execute(pool).await.map_err(DbError::from).map(|r| r.rows_affected())
-            }
-        }
-    };
-}
-
-impl_db_ops!(PgPool, Postgres);
-impl_db_ops!(MySqlPool, MySql);
-// SQLite 不支持 BigDecimal 类型，使用不含 BigDecimal 处理的变体
-impl_db_ops_no_bigdecimal!(SqlitePool, Sqlite);
-
-async fn query_one_any(pool: &AnyPool, sql: &str, params: &[&str]) -> DbResult<Option<Row>> {
-    let mut q = sqlx::query(sql);
-    for p in params { q = q.bind(*p); }
-    Ok(q.fetch_optional(pool).await?.as_ref().map(typed_row_to_row_any))
-}
-
-async fn query_all_any(pool: &AnyPool, sql: &str, params: &[&str]) -> DbResult<Vec<Row>> {
-    let mut q = sqlx::query(sql);
-    for p in params { q = q.bind(*p); }
-    let rows = q.fetch_all(pool).await?;
-    Ok(rows.iter().map(typed_row_to_row_any).collect())
-}
-
-fn typed_row_to_row_any(row: &sqlx::any::AnyRow) -> Row {
-    let mut r = Row::default();
-    for col in row.columns() {
-        let name = col.name().to_string();
-        let idx: usize = col.ordinal();
-        if let Ok(v) = row.try_get::<i64, usize>(idx) {
-            r.data.insert(name, Value::Number(v.into()));
-        } else if let Ok(v) = row.try_get::<i32, usize>(idx) {
-            r.data.insert(name, Value::Number((v as i64).into()));
-        } else if let Ok(v) = row.try_get::<String, usize>(idx) {
-            // 检测 JSONB 列：若字符串是 JSON 数组或对象，则解析为 Value
-            let trimmed = v.trim();
-            if (trimmed.starts_with('{') && trimmed.ends_with('}'))
-                || (trimmed.starts_with('[') && trimmed.ends_with(']'))
-            {
-                if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
-                    r.data.insert(name, parsed);
-                    continue;
-                }
-            }
-            r.data.insert(name, Value::String(v));
-        } else if let Ok(v) = row.try_get::<f64, usize>(idx) {
-            if let Some(n) = Number::from_f64(v) {
-                r.data.insert(name, Value::Number(n));
-            }
-        } else if let Ok(v) = row.try_get::<bool, usize>(idx) {
-            r.data.insert(name, Value::Bool(v));
-        }
-    }
-    r
-}
-
-async fn count_any(pool: &AnyPool, sql: &str, params: &[&str]) -> DbResult<u64> {
-    let mut q = sqlx::query_scalar::<sqlx::Any, i64>(sql);
-    for p in params { q = q.bind(*p); }
-    Ok(q.fetch_optional(pool).await?.unwrap_or(0) as u64)
-}
-
-async fn execute_any(pool: &AnyPool, sql: &str, params: &[&str]) -> DbResult<u64> {
-    let mut q = sqlx::query(sql);
-    for p in params { q = q.bind(*p); }
-    Ok(q.execute(pool).await.map_err(DbError::from)?.rows_affected())
+    /// 底层执行器。按配置选择的驱动连接池。
+    pub(crate) executor: std::sync::Arc<dyn RawExecutor>,
+    /// 数据库配置。
+    pub(crate) config: DatabaseConfig,
 }
 
 impl Db {
-    /// 从 PostgreSQL 连接池创建 Db 实例
-    pub fn postgres(pool: PgPool) -> Self { Self { pool: DbPool::Postgres(pool) } }
-    /// 从 MySQL 连接池创建 Db 实例
-    pub fn mysql(pool: MySqlPool) -> Self { Self { pool: DbPool::Mysql(pool) } }
-    /// 从 SQLite 连接池创建 Db 实例
-    pub fn sqlite(pool: SqlitePool) -> Self { Self { pool: DbPool::Sqlite(pool) } }
-
-    /// 获取 PostgreSQL 连接池引用（非 PG 则 panic）
-    pub fn pg_pool(&self) -> &PgPool { match &self.pool { DbPool::Postgres(p) => p, _ => panic!("不是 PG"), } }
-    /// 获取 MySQL 连接池引用（非 MySQL 则 panic）
-    pub fn mysql_pool(&self) -> &MySqlPool { match &self.pool { DbPool::Mysql(p) => p, _ => panic!("不是 MySQL"), } }
-    /// 获取 SQLite 连接池引用（非 SQLite 则 panic）
-    pub fn sqlite_pool(&self) -> &SqlitePool { match &self.pool { DbPool::Sqlite(p) => p, _ => panic!("不是 SQLite"), } }
-
-    // ── 查询 ─────────────────────────────────────────
-
-    /// 按主键 ID 查询单条记录（主键默认 `id`）
+    /// 按 URL 建立连接。
     ///
-    /// 自动识别 ID 类型（UUID / 整数 / 字符串），添加正确的 SQL 类型转换后缀。
-    ///
-    /// # 参数
-    ///
-    /// - `table`: 表名
-    /// - `id`: 主键值（支持 `i64`、`&str`、`Uuid` 等实现了 `Into<Value>` 的类型）
-    ///
-    /// # 返回值
-    ///
-    /// - `Ok(Some(row))`: 记录存在
-    /// - `Ok(None)`: 记录不存在
-    /// - `Err(_)`: 数据库错误
-    pub async fn find_by_id(&self, table: &str, id: impl Into<serde_json::Value>) -> DbResult<Option<Row>> {
-        let value: serde_json::Value = id.into();
-        let pk = "id";
-        let id_str = value_to_string(&value);
-        let sql = format!("SELECT * FROM {} WHERE {}=$1{}", table, pk, id_cast(&value));
-        let params = vec![id_str.as_str()];
-        self.query_one(&sql, &params).await
-    }
-
-    /// 执行原始 SQL 查询（单条），返回 `Option<Row>`
-    ///
-    /// 参数使用 `$1`、`$2` 占位符，按顺序绑定。
-    pub async fn query_one(&self, sql: &str, params: &[&str]) -> DbResult<Option<Row>> {
-        match &self.pool {
-            DbPool::Postgres(pool) => query_one_pg_pool(pool, sql, params).await,
-            DbPool::Mysql(pool)    => query_one_my_sql_pool(pool, sql, params).await,
-            DbPool::Sqlite(pool)   => query_one_sqlite_pool(pool, sql, params).await,
-            DbPool::Any(pool)      => query_one_any(pool, sql, params).await,
-        }
-    }
-
-    /// 执行原始 SQL 查询（多条），返回 `Vec<Row>`
-    pub async fn query(&self, sql: &str, params: &[&str]) -> DbResult<Vec<Row>> {
-        match &self.pool {
-            DbPool::Postgres(pool) => query_all_pg_pool(pool, sql, params).await,
-            DbPool::Mysql(pool)    => query_all_my_sql_pool(pool, sql, params).await,
-            DbPool::Sqlite(pool)   => query_all_sqlite_pool(pool, sql, params).await,
-            DbPool::Any(pool)      => query_all_any(pool, sql, params).await,
-        }
-    }
-
-    /// 分页查询：自动包裹 COUNT 和 LIMIT/OFFSET
-    ///
-    /// 返回 `(数据列表, 总条数)`。传入的 SQL 应为无 LIMIT/OFFSET 的完整查询。
-    pub async fn query_page(&self, sql: &str, params: &[&str], page: &PageQuery) -> DbResult<(Vec<Row>, u64)> {
-        let count_sql = format!("SELECT COUNT(*) as cnt FROM ({}) AS _count_sub", sql);
-        let total = self.count(&count_sql, params).await?;
-        let page_sql = format!("{} LIMIT {} OFFSET {}", sql, page.limit(), page.offset());
-        let rows = self.query(&page_sql, params).await?;
-        Ok((rows, total))
-    }
-
-    /// 执行 COUNT 查询，返回行数（自动转换为 u64）
-    pub async fn count(&self, sql: &str, params: &[&str]) -> DbResult<u64> {
-        match &self.pool {
-            DbPool::Postgres(pool) => count_pg_pool(pool, sql, params).await,
-            DbPool::Mysql(pool)    => count_my_sql_pool(pool, sql, params).await,
-            DbPool::Sqlite(pool)   => count_sqlite_pool(pool, sql, params).await,
-            DbPool::Any(pool)      => count_any(pool, sql, params).await,
-        }
-    }
-
-    // ── 增删改 ───────────────────────────────────────
-
-    /// 插入单条记录（Row 需设置 `table` 和字段值）
-    ///
-    /// PostgreSQL 使用 `RETURNING *` 直接返回插入后的完整行；
-    /// MySQL/SQLite 插入后通过主键回查。
+    /// 连接串示例：`sqlite://./db.sqlite`、`postgres://user:pass@host/db`、
+    /// `mysql://user:pass@host/db`。建池成功后立即执行一次 `SELECT 1`
+    /// 做连接测试，使认证失败 / 库不可达在启动期快速暴露。
     ///
     /// # 错误
     ///
-    /// - Row 缺少表名 → `Argument` 错误
-    /// - 没有变更字段 → `Argument` 错误
-    pub async fn insert(&self, row: &Row) -> DbResult<Row> {
-        let table = row.table.as_deref().ok_or(DbError::Argument("Row 缺少表名".into()))?;
-        let columns: Vec<&String> = row.changes.iter().collect();
-        if columns.is_empty() { return Err(DbError::Argument("没有变更的字段".into())); }
+    /// 连接串无法解析或连接测试失败时返回 [`DbError`]。
+    pub async fn connect(url: &str) -> Result<Self> {
+        let config = DatabaseConfig::from_url(url);
+        Self::connect_with(url, config).await
+    }
 
-        let placeholders: Vec<String> = columns.iter().enumerate().map(|(i, c)| {
-            let cast = row.data.get(*c).map(|v| value_cast(v)).unwrap_or("");
-            format!("${}{}", i + 1, cast)
-        }).collect();
-        let col_str = columns.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", ");
-        let values: Vec<String> = columns.iter()
-            .filter_map(|c| row.data.get(*c)).map(value_to_string).collect();
-        let val_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+    /// 按 URL 与自定义配置建立连接。
+    ///
+    /// 在 [`connect`](Self::connect) 基础上允许覆盖连接池等配置；显式传入的
+    /// `url` 始终生效。连接建立后同样执行一次 `SELECT 1` 连接测试。
+    ///
+    /// # 错误
+    ///
+    /// 连接建立或连接测试失败时返回 [`DbError`]。
+    pub async fn connect_with(url: &str, config: DatabaseConfig) -> Result<Self> {
+        // 显式传入的 url 始终生效，覆盖 config 内的同名字段
+        let mut config = config;
+        config.url = url.to_string();
+        let executor = create_driver(&config).await?;
+        // 连接测试：建池后立即执行一次 SELECT 1，使认证失败 / 库不可达等
+        // 启动期问题在此快速暴露，而非延迟到首次业务查询
+        executor
+            .query_raw(Statement::Raw(RawStmt {
+                sql: "SELECT 1".into(),
+                params: vec![],
+            }))
+            .await?;
+        Ok(Db { executor, config })
+    }
 
-        if matches!(&self.pool, DbPool::Postgres(_)) {
-            let sql = format!("INSERT INTO {} ({}) VALUES ({}) RETURNING *", table, col_str, placeholders.join(", "));
-            self.query_one(&sql, &val_refs).await?.ok_or_else(|| DbError::Other("INSERT 返回空".into()))
+    /// 返回当前数据库配置。
+    pub fn config(&self) -> &DatabaseConfig {
+        &self.config
+    }
+
+    /// 当前驱动的 SQL 方言。
+    ///
+    /// 供 Builder 等需要渲染 SQL 片段的入口使用。
+    pub fn dialect(&self) -> &'static dyn alun_db_core::traits::Dialect {
+        self.executor.dialect()
+    }
+
+    // ==================== 查询 ====================
+
+    /// 执行 SELECT，返回所有行。
+    pub async fn find(&self, sql: &str) -> Result<Vec<Row>> {
+        self.find_with_params(sql, vec![]).await
+    }
+
+    /// 执行 SELECT，返回首行。
+    pub async fn find_first(&self, sql: &str) -> Result<Option<Row>> {
+        self.find_first_with_params(sql, vec![]).await
+    }
+
+    /// 执行 SELECT，返回单值。
+    pub async fn scalar<T: TypeMapper>(&self, sql: &str) -> Result<T> {
+        self.scalar_with_params(sql, vec![]).await
+    }
+
+    /// 带参数执行 SELECT，返回单值。
+    pub async fn scalar_with_params<T: TypeMapper>(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<T> {
+        let row = self
+            .find_first_with_params(sql, params)
+            .await?
+            .ok_or(DbError::NotFound)?;
+        let value = row
+            .values()
+            .next()
+            .ok_or_else(|| DbError::ColumnNotFound("no columns".into()))?;
+        T::from_value(value)
+    }
+
+    /// 带参数的查询。
+    pub async fn find_with_params(&self, sql: &str, params: Vec<Value>) -> Result<Vec<Row>> {
+        self.find_owned(sql.to_string(), params).await
+    }
+
+    /// 带参数的查询（SQL 已是拥有所有权的字符串，避免再克隆一份）。
+    ///
+    /// 调用方（Builder 渲染、`SqlExecutor` 链）本就把 SQL 做成 `String`，
+    /// 走 [`find_with_params`](Self::find_with_params) 会白白多一次整串拷贝。
+    pub(crate) async fn find_owned(&self, sql: String, params: Vec<Value>) -> Result<Vec<Row>> {
+        let stmt = Statement::Raw(RawStmt { sql, params });
+        // F10：所有 SELECT 最终汇聚于此（Builder / `sql!` / `ModelQuery` 都经此），
+        // 因此只在此埋点即可覆盖全读路径，无需在每条链路上重复计时。
+        #[cfg(feature = "metrics")]
+        let rows = crate::metrics::instrument(
+            "query",
+            crate::metrics::TABLE_RAW,
+            self.executor.query_raw(stmt),
+        )
+        .await?;
+        #[cfg(not(feature = "metrics"))]
+        let rows = self.executor.query_raw(stmt).await?;
+        Ok(rows.0)
+    }
+
+    /// 带参数的查询，返回首行。
+    ///
+    /// 当 SQL 为不含 `LIMIT` 的 SELECT 类语句时自动追加 `LIMIT 1`，
+    /// 避免全量取回后再取首行；INSERT ... RETURNING 等非查询语句不受影响。
+    pub async fn find_first_with_params(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<Option<Row>> {
+        // 追加 `LIMIT 1` 与构造语句一次成型，不再经通用查询路径二次拷贝 SQL
+        let sql = if can_append_limit(sql) {
+            format!("{sql} LIMIT 1")
         } else {
-            let sql = format!("INSERT INTO {} ({}) VALUES ({})", table, col_str, placeholders.join(", "));
-            self.execute(&sql, &val_refs).await?;
-            let pk_val = row.data.get("id");
-            match pk_val {
-                Some(v) => self.find_by_id(table, v.clone()).await?.ok_or(DbError::Other("INSERT 后查不到".into())),
-                None => Err(DbError::Argument("非 PG 数据库需 Row 含主键".into())),
-            }
-        }
+            sql.to_string()
+        };
+        self.find_first_owned(sql, params).await
     }
 
-    /// 批量插入记录，返回受影响行数
+    /// 带参数的查询并只保留首行（SQL 已拥有所有权）。
     ///
-    /// 所有 Row 必须来自同一张表且变更字段一致。
-    pub async fn batch_insert(&self, rows: &[Row]) -> DbResult<u64> {
-        if rows.is_empty() { return Ok(0); }
-        let table = rows[0].table.as_deref().ok_or(DbError::Argument("Row 缺少表名".into()))?;
-        let columns: Vec<&String> = rows[0].changes.iter().collect();
-        if columns.is_empty() { return Err(DbError::Argument("没有变更的字段".into())); }
-
-        let col_names = columns.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", ");
-        let mut all_params: Vec<String> = Vec::new();
-        let mut groups: Vec<String> = Vec::new();
-        for (ri, row) in rows.iter().enumerate() {
-            let offset = ri * columns.len();
-            let ph: Vec<String> = columns.iter().enumerate().map(|(ci, c)| {
-                let cast = row.data.get(*c).map(|v| value_cast(v)).unwrap_or("");
-                format!("${}{}", offset + ci + 1, cast)
-            }).collect();
-            groups.push(format!("({})", ph.join(", ")));
-            for c in &columns {
-                all_params.push(row.data.get(*c).map(value_to_string).unwrap_or_default());
-            }
-        }
-        let sql = format!("INSERT INTO {} ({}) VALUES {}", table, col_names, groups.join(", "));
-        let val_refs: Vec<&str> = all_params.iter().map(|s| s.as_str()).collect();
-        self.execute(&sql, &val_refs).await
+    /// 缺少 `LIMIT` 时由调用方追加；本方法不再改动 SQL，也不构造整段结果
+    /// 再去掉首行以外的行。
+    pub(crate) async fn find_first_owned(
+        &self,
+        sql: String,
+        params: Vec<Value>,
+    ) -> Result<Option<Row>> {
+        let stmt = Statement::Raw(RawStmt { sql, params });
+        let rows = self.executor.query_raw(stmt).await?;
+        Ok(rows.0.into_iter().next())
     }
 
-    /// 更新单条记录（根据 Row 的 `changes` 和主键）
+    // ==================== 分页 ====================
+
+    /// 分页查询。
     ///
-    /// 仅更新 `changes` 中标记的字段，主键必须存在于 `data` 中。
-    /// PostgreSQL 使用 `RETURNING *` 返回更新后的行。
-    ///
-    /// 对 `Value::Null` 字段生成 `column = NULL`，不占用参数占位符。
-    pub async fn update(&self, row: &Row) -> DbResult<Option<Row>> {
-        let table = row.table.as_deref().ok_or(DbError::Argument("Row 缺少表名".into()))?;
-
-        // 构建 SET 子句：非 null 值使用参数占位符，null 值直接写 NULL
-        let mut sets: Vec<String> = Vec::with_capacity(row.changes.len());
-        let mut params: Vec<String> = Vec::with_capacity(row.changes.len() + 1);
-        let mut param_idx = 0usize;
-
-        for col in &row.changes {
-            if let Some(value) = row.data.get(col) {
-                if value.is_null() {
-                    sets.push(format!("{} = NULL", col));
-                } else {
-                    param_idx += 1;
-                    let cast = value_cast(value);
-                    sets.push(format!("{} = ${}{}", col, param_idx, cast));
-                    params.push(value_to_string(value));
-                }
-            }
-        }
-
-        if sets.is_empty() {
-            return Err(DbError::Argument("没有要更新的字段".into()));
-        }
-
-        let pk = row.primary_keys.first().map(|s| s.as_str()).unwrap_or("id");
-        let id_value = row.data.get(pk).ok_or(DbError::Argument("Row 缺少主键".into()))?;
-
-        let where_param_idx = param_idx + 1;
-        params.push(value_to_string(id_value));
-        let val_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
-
-        let id_cast_sql = id_cast(id_value);
-        if matches!(&self.pool, DbPool::Postgres(_)) {
-            let sql = format!("UPDATE {} SET {} WHERE {}=${}{} RETURNING *",
-                table, sets.join(", "), pk, where_param_idx, id_cast_sql);
-            self.query_one(&sql, &val_refs).await
-        } else {
-            let sql = format!("UPDATE {} SET {} WHERE {}=${}{}",
-                table, sets.join(", "), pk, where_param_idx, id_cast_sql);
-            let n = self.execute(&sql, &val_refs).await?;
-            if n > 0 { self.find_by_id(table, id_value.clone()).await } else { Ok(None) }
-        }
-    }
-
-    /// 批量更新（按 WHERE 条件），返回受影响行数
-    ///
-    /// - `sets`: 要更新的字段值（Row 含 changes）
-    /// - `where_sql`: WHERE 子句（不含 `WHERE` 关键字），参数使用 `$1` 占位符
-    /// - `where_params`: WHERE 子句的参数值
-    pub async fn batch_update(&self, table: &str, sets: &Row, where_sql: &str, where_params: &[&str]) -> DbResult<u64> {
-        if sets.changes.is_empty() { return Err(DbError::Argument("没有要更新的字段".into())); }
-        let set_clauses: Vec<String> = sets.changes.iter().enumerate()
-            .map(|(i, col)| {
-                let cast = sets.data.get(col).map(|v| value_cast(v)).unwrap_or("");
-                format!("{} = ${}{}", col, i + 1, cast)
-            }).collect();
-        let set_values: Vec<String> = sets.changes.iter()
-            .filter_map(|c| sets.data.get(c)).map(value_to_string).collect();
-
-        let offset = sets.changes.len();
-        let adjusted_where = adjust_param_indices_with_casts(where_sql, offset, where_params);
-        let sql = format!("UPDATE {} SET {} WHERE {}", table, set_clauses.join(", "), adjusted_where);
-        let mut all: Vec<String> = set_values;
-        all.extend(where_params.iter().map(|s| s.to_string()));
-        let val_refs: Vec<&str> = all.iter().map(|s| s.as_str()).collect();
-        self.execute(&sql, &val_refs).await
-    }
-
-    /// 按主键删除记录，返回是否成功删除
-    pub async fn delete_by_id(&self, table: &str, id: impl Into<serde_json::Value>) -> DbResult<bool> {
-        let value: serde_json::Value = id.into();
-        let pk = "id";
-        let id_str = value_to_string(&value);
-        let sql = format!("DELETE FROM {} WHERE {}=$1{}",
-            table, pk, id_cast(&value));
-        let n = self.execute(&sql, &[&id_str]).await?;
-        Ok(n > 0)
-    }
-
-    /// 批量按主键删除，返回受影响行数
-    pub async fn batch_delete_by_ids(&self, table: &str, ids: &[impl AsRef<str>]) -> DbResult<u64> {
-        if ids.is_empty() { return Ok(0); }
-        let is_uuid = ids.first().map(|id| {
-            let s = id.as_ref();
-            s.len() == 36 && s.chars().filter(|&c| c == '-').count() == 4
-        }).unwrap_or(false);
-        let cast = if is_uuid { "::uuid" } else { "" };
-        let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${}{}", i, cast)).collect();
-        let sql = format!("DELETE FROM {} WHERE id IN ({})", table, placeholders.join(", "));
-        let params: Vec<&str> = ids.iter().map(|id| id.as_ref()).collect();
-        self.execute(&sql, &params).await
-    }
-
-    /// 执行 INSERT/UPDATE/DELETE 等写操作，返回受影响行数
-    pub async fn execute(&self, sql: &str, params: &[&str]) -> DbResult<u64> {
-        match &self.pool {
-            DbPool::Postgres(pool) => execute_pg_pool(pool, sql, params).await,
-            DbPool::Mysql(pool)    => execute_my_sql_pool(pool, sql, params).await,
-            DbPool::Sqlite(pool)   => execute_sqlite_pool(pool, sql, params).await,
-            DbPool::Any(pool)      => execute_any(pool, sql, params).await,
-        }
-    }
-
-    /// 执行原始 SQL 脚本（支持多条语句，按分号分隔）
-    ///
-    /// 使用 sqlx::raw_sql 执行完整的 SQL 脚本，适用于数据库迁移场景。
-    /// 支持多条 SQL 语句、PostgreSQL 的 DO $$ 块、PL/pgSQL 函数等复杂语法。
-    /// 整个脚本在一个隐式事务中执行，任一语句失败则全部回滚。
+    /// 页码与页大小由调用方给出（Web 场景下通常来自框架的分页参数
+    /// `PageQuery` 的 `page` / `page_size` 字段）；本方法自身也做下界保护。
     ///
     /// # 参数
     ///
-    /// - `sql`: 完整的 SQL 脚本字符串
-    ///
-    /// # 返回值
-    ///
-    /// - `Ok(())`: 脚本执行成功
-    /// - `Err(_)`: 数据库错误
-    ///
-    /// # 示例
-    ///
-    /// ```ignore
-    /// db.execute_raw_sql("CREATE TABLE foo (id INT); INSERT INTO foo VALUES (1);").await?;
-    /// ```
-    pub async fn execute_raw_sql(&self, sql: &str) -> DbResult<()> {
-        match &self.pool {
-            DbPool::Postgres(pool) => {
-                sqlx::raw_sql(sql).execute(pool).await.map_err(DbError::from)?;
-            }
-            DbPool::Mysql(pool) => {
-                sqlx::raw_sql(sql).execute(pool).await.map_err(DbError::from)?;
-            }
-            DbPool::Sqlite(pool) => {
-                sqlx::raw_sql(sql).execute(pool).await.map_err(DbError::from)?;
-            }
-            DbPool::Any(_) => {
-                return Err(DbError::Other("Any 连接池不支持 execute_raw_sql，请使用具体数据库类型".into()));
-            }
-        }
-        Ok(())
+    /// - `sql`：基础查询（不含 LIMIT / OFFSET）
+    /// - `page`：页码，从 1 开始；传入 0 时按 1 处理
+    /// - `size`：每页大小，至少 1；传入 0 时按 1 处理
+    pub async fn paginate(&self, sql: &str, page: u64, size: u64) -> Result<Page<Row>> {
+        self.paginate_with_params(sql, vec![], page, size).await
     }
 
-    /// 使用 sqlx 内置 Migrator 执行迁移
-    ///
-    /// 通过 sqlx::migrate::Migrator 执行迁移，自动维护 `_sqlx_migrations` 表。
-    /// 支持迁移版本追踪、checksum 校验、事务回滚等特性。
+    /// 带参数的分页查询。
     ///
     /// # 参数
     ///
-    /// - `migrator`: sqlx Migrator 实例
+    /// - `sql`：基础查询（不含 LIMIT / OFFSET），可含占位符
+    /// - `params`：占位符对应的绑定参数
+    /// - `page`：页码，从 1 开始；传入 0 时按 1 处理
+    /// - `size`：每页大小，至少 1；传入 0 时按 1 处理
+    pub async fn paginate_with_params(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+        page: u64,
+        size: u64,
+    ) -> Result<Page<Row>> {
+        // 页码与页大小的下界保护，避免无符号下溢
+        let page = page.max(1);
+        let size = size.max(1);
+        let offset = (page - 1) * size;
+
+        // 计数
+        let count_sql = format!("SELECT COUNT(*) FROM ({sql}) AS _count");
+        let total: i64 = self.scalar_with_params(&count_sql, params.clone()).await?;
+
+        // 数据：LIMIT / OFFSET 内联为字面量（见 `Dialect::push_limit_offset`：
+        // 参数化 LIMIT 会让 SQLite 每次查询多花约 2.7 µs）
+        let mut data_sql = String::with_capacity(sql.len() + 24);
+        data_sql.push_str(sql);
+        self.dialect()
+            .push_limit_offset(Some(size), Some(offset), &mut data_sql);
+        let list = self.find_owned(data_sql, params).await?;
+
+        Ok(Page {
+            list,
+            total: total as u64,
+            page,
+            size,
+            pages: Page::<Row>::calc_pages(total as u64, size),
+        })
+    }
+
+    // ==================== 执行 ====================
+
+    /// 执行 INSERT / UPDATE / DELETE，返回受影响行数。
+    pub async fn execute(&self, sql: &str) -> Result<u64> {
+        self.execute_with_params(sql, vec![]).await
+    }
+
+    /// 执行多语句 SQL 脚本（迁移 / 初始化 / 测试种子数据场景）。
     ///
-    /// # 返回值
-    ///
-    /// - `Ok(())`: 迁移执行成功
-    /// - `Err(_)`: 数据库错误
-    pub async fn run_sqlx_migrator(&self, migrator: &sqlx::migrate::Migrator) -> DbResult<()> {
-        match &self.pool {
-            DbPool::Postgres(pool) => {
-                migrator.run(pool).await.map_err(DbError::from)?;
-            }
-            DbPool::Mysql(pool) => {
-                migrator.run(pool).await.map_err(DbError::from)?;
-            }
-            DbPool::Sqlite(pool) => {
-                migrator.run(pool).await.map_err(DbError::from)?;
-            }
-            DbPool::Any(_) => {
-                return Err(DbError::Other("Any 连接池不支持 sqlx Migrator".into()));
-            }
+    /// 依赖驱动的多语句执行能力：SQLite、PostgreSQL 原生支持；MySQL 驱动
+    /// 未启用多语句模式时返回 [`DbError::UnsupportedFeature`]。
+    pub async fn execute_script(&self, sql: &str) -> Result<()> {
+        #[cfg(feature = "metrics")]
+        {
+            crate::metrics::instrument(
+                "script",
+                crate::metrics::TABLE_RAW,
+                self.executor.execute_script(sql),
+            )
+            .await
         }
-        Ok(())
-    }
-
-    /// 使用 sqlx Migrator 回滚指定数量的迁移
-    ///
-    /// 通过 sqlx::migrate::Migrator 的 undo 功能回滚最近 `count` 个迁移。
-    /// 需要对应的 `.down.sql` 回滚文件存在。
-    ///
-    /// # 参数
-    ///
-    /// - `migrator`: sqlx Migrator 实例
-    /// - `count`: 回滚的迁移数量
-    ///
-    /// # 返回值
-    ///
-    /// - `Ok(())`: 回滚成功
-    /// - `Err(_)`: 数据库错误
-    pub async fn undo_sqlx_migrator(&self, migrator: &sqlx::migrate::Migrator, count: i64) -> DbResult<()> {
-        match &self.pool {
-            DbPool::Postgres(pool) => {
-                migrator.undo(pool, count).await.map_err(DbError::from)?;
-            }
-            DbPool::Mysql(pool) => {
-                migrator.undo(pool, count).await.map_err(DbError::from)?;
-            }
-            DbPool::Sqlite(pool) => {
-                migrator.undo(pool, count).await.map_err(DbError::from)?;
-            }
-            DbPool::Any(_) => {
-                return Err(DbError::Other("Any 连接池不支持 sqlx Migrator undo".into()));
-            }
-        }
-        Ok(())
-    }
-
-    // ── 事务 ─────────────────────────────────────────
-
-    /// 在事务闭包中执行操作，自动 BEGIN/COMMIT/ROLLBACK
-    ///
-    /// 闭包返回 `Ok` 则 COMMIT，返回 `Err` 则 ROLLBACK。
-    /// 可通过 `ActiveTx::set_rollback_only()` 强制回滚。
-    ///
-    /// # 示例
-    ///
-    /// ```ignore
-    /// db.transaction(|mut tx| async move {
-    ///     let user = Row::table("user").id(1);
-    ///     tx.execute("UPDATE user SET name=$1 WHERE id=$2", &["Alice", "1"]).await?;
-    ///     (tx, Ok(()))
-    /// }).await?;
-    /// ```
-    pub async fn transaction<F, Fut, T>(&self, f: F) -> DbResult<T>
-    where
-        F: FnOnce(crate::tx::ActiveTx) -> Fut + Send,
-        Fut: std::future::Future<Output = (crate::tx::ActiveTx, DbResult<T>)> + Send,
-        T: Send,
-    {
-        let mut rollback_only = false;
-        crate::tx::execute_transaction(&self.pool, crate::tx::Isolation::ReadCommitted, &mut rollback_only, f).await
-    }
-}
-
-// ── 辅助函数 ───────────────────────────────────────
-
-pub(crate) fn value_to_string(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => String::new(),
-        other => other.to_string(),
-    }
-}
-
-fn adjust_param_indices_with_casts(sql: &str, offset: usize, params: &[&str]) -> String {
-    let re = regex::Regex::new(r"\$(\d+)").unwrap();
-    if offset == 0 {
-        return re.replace_all(sql, |caps: &regex::Captures| {
-            let n: usize = caps[1].parse().unwrap_or(0);
-            let cast = params.get(n.wrapping_sub(1)).map(|v| {
-                let s: &str = v;
-                if s.len() == 36 && s.chars().filter(|&c| c == '-').count() == 4 { "::uuid" }
-                else if s.parse::<i64>().is_ok() { "::bigint" }
-                else if s.parse::<f64>().is_ok() { "::numeric" }
-                else { "" }
-            }).unwrap_or("");
-            format!("${}{}", n, cast)
-        }).to_string();
-    }
-    re.replace_all(sql, |caps: &regex::Captures| {
-        let n: usize = caps[1].parse().unwrap_or(0);
-        let cast = params.get(n.wrapping_sub(1)).map(|v| {
-            let s: &str = v;
-            if s.len() == 36 && s.chars().filter(|&c| c == '-').count() == 4 { "::uuid" }
-            else if s.parse::<i64>().is_ok() { "::bigint" }
-            else if s.parse::<f64>().is_ok() { "::numeric" }
-            else { "" }
-        }).unwrap_or("");
-        format!("${}{}", n + offset, cast)
-    }).to_string()
-}
-
-fn id_cast(value: &Value) -> &'static str {
-    match IdKind::detect(value) {
-        IdKind::Uuid => "::uuid",
-        IdKind::I64 => "::bigint",
-        _ => "",
-    }
-}
-
-pub(crate) fn value_cast(value: &Value) -> &'static str {
-    match value {
-        Value::Object(_) | Value::Array(_) => "::jsonb",
-        Value::String(s) => {
-            if is_inet_format(s) {
-                "::inet"
-            } else if is_date_format(s) {
-                "::date"
-            } else if is_timestamptz_format(s) {
-                "::timestamptz"
-            } else {
-                match IdKind::detect(value) {
-                    IdKind::Uuid => "::uuid",
-                    IdKind::I64 => "::bigint",
-                    IdKind::F64 => "::numeric",
-                    IdKind::Bool => "::boolean",
-                    IdKind::Json => "::jsonb",
-                    _ => "",
-                }
-            }
-        }
-        _ => match IdKind::detect(value) {
-            IdKind::Uuid => "::uuid",
-            IdKind::I64 => "::bigint",
-            IdKind::F64 => "::numeric",
-            IdKind::Bool => "::boolean",
-            IdKind::Json => "::jsonb",
-            _ => "",
-        },
-    }
-}
-
-/// 检测日期格式（YYYY-MM-DD）
-fn is_date_format(s: &str) -> bool {
-    if s.len() != 10 { return false; }
-    let bytes = s.as_bytes();
-    bytes[4] == b'-' && bytes[7] == b'-'
-        && bytes[..4].iter().all(|b| b.is_ascii_digit())
-        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
-        && bytes[8..].iter().all(|b| b.is_ascii_digit())
-}
-
-/// 检测时间戳格式（YYYY-MM-DDTHH:MM:SS 或含时区后缀）
-fn is_timestamptz_format(s: &str) -> bool {
-    if s.len() < 19 { return false; }
-    let bytes = s.as_bytes();
-    bytes[4] == b'-' && bytes[7] == b'-'
-        && (bytes[10] == b'T' || bytes[10] == b' ')
-        && bytes[13] == b':' && bytes[16] == b':'
-        && bytes[..4].iter().all(|b| b.is_ascii_digit())
-        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
-        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
-}
-
-fn is_inet_format(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().is_ok()) {
-        return true;
-    }
-    if s.contains("::") {
-        return true;
-    }
-    if s.contains(':') {
-        let parts: Vec<&str> = s.split(':').collect();
-        if parts.len() >= 2 && parts.len() <= 8 {
-            return parts.iter().all(|p| p.is_empty() || u16::from_str_radix(p, 16).is_ok());
+        #[cfg(not(feature = "metrics"))]
+        {
+            self.executor.execute_script(sql).await
         }
     }
-    false
+
+    /// 带参数执行。
+    pub async fn execute_with_params(&self, sql: &str, params: Vec<Value>) -> Result<u64> {
+        self.execute_owned(sql.to_string(), params).await
+    }
+
+    /// 带参数执行（SQL 已拥有所有权，避免再克隆一份）。
+    pub(crate) async fn execute_owned(&self, sql: String, params: Vec<Value>) -> Result<u64> {
+        let stmt = Statement::Raw(RawStmt { sql, params });
+        // F10：写路径汇聚点（同 `find_owned`）
+        #[cfg(feature = "metrics")]
+        let result = crate::metrics::instrument(
+            "exec",
+            crate::metrics::TABLE_RAW,
+            self.executor.execute_raw(stmt),
+        )
+        .await?;
+        #[cfg(not(feature = "metrics"))]
+        let result = self.executor.execute_raw(stmt).await?;
+        Ok(result.rows_affected)
+    }
+
+    /// 执行 INSERT 并返回自增主键。
+    pub async fn insert_returning_id(&self, sql: &str, params: Vec<Value>) -> Result<i64> {
+        let stmt = Statement::Raw(RawStmt {
+            sql: sql.to_string(),
+            params,
+        });
+        let result = self.executor.execute_raw(stmt).await?;
+        result.last_insert_id.ok_or_else(|| DbError::Query {
+            sql: sql.to_string(),
+            source: "no last_insert_id returned".into(),
+        })
+    }
+
+    // ==================== Builder 入口 ====================
+
+    /// 创建查询 Builder。链式 `table` / `filter` / `order_by` 后以
+    /// [`FindBuilder::exec`] 执行。
+    pub fn query(&self) -> FindBuilder {
+        FindBuilder::new()
+    }
+
+    /// 创建分页 Builder。基于页码的 OFFSET 分页，或 `page_after` 键值（keyset）
+    /// 分页。
+    pub fn page(&self, page: u64, size: u64) -> PageBuilder {
+        PageBuilder::new(page, size)
+    }
+
+    /// 创建计数 Builder。以 [`CountBuilder::exec`] 返回 COUNT 结果。
+    pub fn count(&self) -> CountBuilder {
+        CountBuilder::new()
+    }
 }
-
-

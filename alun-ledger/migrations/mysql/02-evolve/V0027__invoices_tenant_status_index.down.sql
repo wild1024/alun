@@ -1,0 +1,1 @@
+DROP INDEX idx_invoices_tenant_status ON invoices

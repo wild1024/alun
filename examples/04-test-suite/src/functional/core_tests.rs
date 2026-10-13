@@ -4,9 +4,9 @@
 
 #[cfg(test)]
 mod tests {
-    use alun_core::api::{Res, ApiError, PageQuery, PageData, codes};
-    use alun_core::{Error, Result};
+    use alun_web::api::{ApiError, PageData, PageQuery, Res, codes};
     use alun_core::plugin::{Plugin, PluginManager};
+    use alun_core::{Error, Result};
     use serde::Serialize;
 
     // ──── Error 类型测试 ──────────────────────────────
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn test_result_alias() {
         let r: Result<i32> = Ok(42);
-        assert_eq!(r.unwrap(), 42);
+        assert!(matches!(r, Ok(42)));
 
         let e: Result<i32> = Err(Error::Msg("失败".into()));
         assert!(e.is_err());
@@ -136,11 +136,20 @@ mod tests {
     #[test]
     fn test_res_page() {
         #[derive(Debug, Clone, Serialize, PartialEq)]
-        struct Item { id: i64, name: String }
+        struct Item {
+            id: i64,
+            name: String,
+        }
 
         let items = vec![
-            Item { id: 1, name: "A".into() },
-            Item { id: 2, name: "B".into() },
+            Item {
+                id: 1,
+                name: "A".into(),
+            },
+            Item {
+                id: 2,
+                name: "B".into(),
+            },
         ];
         let r = Res::page(items, 100, 1, 20);
         assert_eq!(r.code, codes::OK);
@@ -311,6 +320,58 @@ mod tests {
         assert_eq!(pq.limit(), 50);
     }
 
+    #[test]
+    fn test_page_query_deserialize_clamps_zero() {
+        // 反序列化路径曾绕过 new() 的校验：page=0 会让 offset() 在 u64 上下溢
+        let pq: PageQuery = serde_json::from_str(r#"{"page":0,"page_size":0}"#).unwrap();
+        assert_eq!((pq.page, pq.page_size), (1, 10));
+        assert_eq!(pq.offset(), 0);
+        assert_eq!(pq.limit(), 10);
+    }
+
+    #[test]
+    fn test_page_query_deserialize_missing_fields() {
+        // 参数缺省同样按默认值规整，而不是 400
+        let pq: PageQuery = serde_json::from_str("{}").unwrap();
+        assert_eq!((pq.page, pq.page_size), (1, 10));
+    }
+
+    #[test]
+    fn test_page_query_deserialize_clamps_max() {
+        let pq: PageQuery = serde_json::from_str(r#"{"page":3,"page_size":5000}"#).unwrap();
+        assert_eq!((pq.page, pq.page_size), (3, 1000));
+    }
+
+    #[test]
+    fn test_page_query_offset_never_underflows() {
+        // 直接构造越界值（绕过 new）也不得 panic
+        let pq = PageQuery {
+            page: 0,
+            page_size: 0,
+        };
+        assert_eq!(pq.offset(), 0);
+        assert_eq!(pq.limit(), 10);
+
+        let pq = PageQuery {
+            page: u64::MAX,
+            page_size: u64::MAX,
+        };
+        assert_eq!(pq.offset(), (u64::MAX - 1).saturating_mul(1000));
+    }
+
+    #[test]
+    fn test_page_query_calc_pages_matches_db() {
+        // 总页数口径必须与 alun-db 的 Page::calc_pages 一致
+        for (total, size) in [(0u64, 20u64), (1, 20), (20, 20), (21, 20), (95, 20)] {
+            let pq = PageQuery::new(1, size);
+            assert_eq!(
+                pq.calc_pages(total),
+                alun_db::Page::<()>::calc_pages(total, size),
+                "total={total} size={size}"
+            );
+        }
+    }
+
     // ──── codes 常量测试 ──────────────────────────────
 
     #[test]
@@ -336,7 +397,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Plugin for TestPlugin {
-        fn name(&self) -> &str { self.name }
+        fn name(&self) -> &str {
+            self.name
+        }
 
         async fn start(&self) -> Result<()> {
             Ok(())

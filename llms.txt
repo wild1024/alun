@@ -1,0 +1,80 @@
+# Alun Framework
+
+> 面向 AI Coding 的 Rust Web 框架：配置驱动 + 插件架构。一个接口 = 一个 `async fn` + 一个宏注解。
+> 版本 0.3.0（Edition 2024，rust-version 1.94.1），Cargo workspace 含 21 个 crate + 5 个示例工程。
+> 设计目标：极小化 Token、极大化注意力浓度、稳定生成可直接编译的高品质 Rust 业务代码。
+> 设计理念承接 [Aifei](https://github.com/jfinal/aifei)（世界首个 AI Coding 框架，[官网](https://aifei.cn)）的 Just Service 范式，
+> 在 Rust 生态称 Just Config —— 详见 `docs/architecture/aifei-tribute.md`。
+
+## Overview
+
+- 唯一框架依赖 `alun`；路由 / 配置 / 数据库 / 响应 / 错误全部来自 `use alun::prelude::*;`。
+- handler 唯一签名 `ResResult<T> = Result<Res<T>, ApiError>`，响应统一 `{code,msg,data}`。
+- 路由由 `scan()` 自动收集 `#[alun::get/post/...]`，无需手写注册。
+- feature 分层：`default=["core"]`；数据库必选驱动 `sqlite/postgres/mysql`；预设 `mini ⊂ lite ⊂ full`。
+- 文档 Rust 代码块会被 rustdoc 真实编译（`rust,no_run` 可编译 / `rust,ignore` 纯示意）。
+
+## Project Structure
+
+- [README.md](./README.md) : 框架总览、七层能力、feature 选择、推荐项目架构、技术栈
+- [Cargo.toml](./Cargo.toml) : workspace 定义（21 crate + 5 examples）、共享依赖、profile 提速
+- [alun/Cargo.toml](./alun/Cargo.toml) : **门面 + 全部 feature 定义**（core/lite/full、驱动、生态类型、fs 后端）
+- [alun/](./alun/) : 门面 crate（prelude 再导出 + 宏）
+- [alun-web/src/api.rs](./alun-web/src/api.rs) : `ApiError` 定义 + `From<DbError>` 错误收敛
+- [alun-web/src/response.rs](./alun-web/src/response.rs) : `Res<T>` / `ResResult<T>` 响应类型
+- [alun-web/src/jwt.rs](./alun-web/src/jwt.rs) : JWT / ClaimsBuilder / 角色权限
+- [alun-web/src/router.rs](./alun-web/src/router.rs) : `scan()` 路由收集 + 装配
+- [alun-web/src/app.rs](./alun-web/src/app.rs) : `App` 构建器
+- [alun-db/src/](./alun-db/src/) : Db 门面、Model/CrudExt/PersistExt/ModelQuery/ChangeSet/`sql!`/事务/迁移
+- [alun-db-core/src/](./alun-db-core/src/) : Row / Value / Expr / Dialect / Hook / `DbError` / Page
+- [alun-db-driver-postgres/](./alun-db-driver-postgres/) : tokio-postgres 驱动
+- [examples/](./examples/) : 可运行示例 00-quick-start / 01-basic / 02-auth / 03-db-crud / 04-test-suite
+- [docs/index.md](./docs/index.md) : 文档总索引（guides/reference/architecture/migrations）；机器可读 [docs/index.json](./docs/index.json)
+
+## Key Docs (read on demand)
+
+> 推荐阅读顺序：先 `README.md` 建立全局认知 → `docs/index.json` 定位所需文档 → 按需读 `guides/*` 与 `reference/*`。引用请用语义 id（见 AGENTS.md），勿引用行号。
+
+- [docs/guides/getting-started.md](./docs/guides/getting-started.md) : 入门总目录；实体按步骤拆在 docs/guides/startup/（setup / config-basics / first-endpoint / middleware / hooks-plugins / custom-config / config-reference / security-model）
+- [docs/guides/database.md](./docs/guides/database.md) : 数据库实操总目录；实体内容按主题拆在 docs/guides/db/（getting-started / modeling / crud / recipes / ops / multi-tenant / appendix）
+- [docs/architecture/overview.md](./docs/architecture/overview.md) : 架构分层、设计理念、与 Java 系框架差异、feature 预设
+- [docs/guides/fullstack.md](./docs/guides/fullstack.md) : 全栈技术选型
+- [docs/guides/recommended-architecture.md](./docs/guides/recommended-architecture.md) : 推荐业务项目结构（modules 垂直切割）
+- [docs/migrations/v0.3.0-breaking.md](./docs/migrations/v0.3.0-breaking.md) : 0.3.0 破坏性变更与升级指南（B1–B10、F1–F20、安全修复、验证矩阵）
+- [CHANGELOG.md](./CHANGELOG.md) : 全局版本变更日志
+- [docs/glossary.md](./docs/glossary.md) : 术语表
+- [docs/index.json](./docs/index.json) : 机器可读文档索引（id / 摘要 / 标签 / token / 依赖）
+
+## Detailed AI Skill (reference)
+
+- [skill-alun/SKILL.md](./skill-alun/SKILL.md) : 详细速查手册（人与 AI 通用），配 10 份 references/
+- [skill-alun/references/routing.md](./skill-alun/references/routing.md) : 路由四种写法
+- [skill-alun/references/database.md](./skill-alun/references/database.md) : 数据库 API 速查
+- [skill-alun/references/auth.md](./skill-alun/references/auth.md) : 认证/权限
+- [skill-alun/references/advanced-db.md](./skill-alun/references/advanced-db.md) : 进阶 SQL / 关联 / 事务
+- [skill-alun/references/config.md](./skill-alun/references/config.md) : 配置驱动
+- [skill-alun/references/plugins.md](./skill-alun/references/plugins.md) : 插件 / 异步任务
+- [skill-alun/references/realtime-sse.md](./skill-alun/references/realtime-sse.md) : SSE 实时推送
+- [skill-alun/references/observability.md](./skill-alun/references/observability.md) : 可观测 / 指标
+- [skill-alun/references/export-and-import.md](./skill-alun/references/export-and-import.md) : 导出导入 / XLSX
+- [skill-alun/references/extension-points.md](./skill-alun/references/extension-points.md) : 扩展点
+
+## Core Conventions (inline)
+
+- 业务代码 `use alun::prelude::*;`，不要再引子 crate。
+- handler：`async fn -> ResResult<T>`；错误用 `ApiError::not_found/bad_request/unauthorized/forbidden/internal`。
+- 数据层：`DbResult<T>`（= `Result<T, DbError>`），`?` 自动上转成 `ApiError`，handler 不写 `map_err`。
+- 路由：`#[alun::get("/path")]` + `scan()`；分组 `#[alun::controller]`；探针 Builder；库 `#[alun::routes]`+`.module()`。
+- 响应形状：`{ "code": 0, "msg": "ok", "data": .. }`；5xx 对前端模糊化，详情仅进日志。
+- 分页：请求 `PageQuery`、响应 `PageData<T>`、`PageResponseExt::into_res()`。
+- 模型：`#[derive(Model)]` + `#[table("name")]`，表名/主键/时间戳/软删有默认；金额用 `Decimal` 不用 `f64`。
+
+## Gotchas (verify before assuming)
+
+- 只写 `features=["db"]` 不选驱动 → 建池报 `UnsupportedFeature`，必须选 `sqlite/postgres/mysql`。
+- `WebError` 已删除，统一用 `ApiError`（在 `alun-web`）。
+- 不要串 `alun-core/db`（该 feature 已不存在）——core 与 DB 内核互不依赖是硬约束。
+- `fs` = `fs-local`；要 MinIO 写 `fs-minio`；`lite` 预设不含 `template`（需显式加）。
+- 文档代码块被 rustdoc 编译：可编译用 `rust,no_run`，纯示意用 `rust,ignore`。
+- 改宏路由后 404 → 确认 `scan()` 在 `main` 且 handler 与 `scan()` 同编译单元。
+- 根 `README.md` 提到的 `./scripts/quick-test.py` 在本 checkout 不存在；用 `cargo test --workspace`。

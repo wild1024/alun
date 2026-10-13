@@ -65,12 +65,7 @@ impl MinioBackend {
 
     /// 确保 bucket 存在，若不存在则创建
     async fn ensure_bucket(&self) -> Result<(), String> {
-        let exists = self
-            .client
-            .head_bucket()
-            .bucket(&self.bucket)
-            .send()
-            .await;
+        let exists = self.client.head_bucket().bucket(&self.bucket).send().await;
 
         if exists.is_err() {
             self.client
@@ -320,9 +315,6 @@ mod tests {
     fn test_backend_type() {
         // 无法在单元测试中创建 MinioBackend 实例（需要真实服务），
         // 但可验证静态方法
-        assert_eq!(
-            MinioBackend::mime_type("test.png"),
-            "image/png"
-        );
+        assert_eq!(MinioBackend::mime_type("test.png"), "image/png");
     }
 }

@@ -1,15 +1,14 @@
 [package]
 name = "example-auth"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 publish = false
 
 [dependencies]
-alun = { path = "../../alun", features = ["full"] }
+alun = { path = "../../alun", features = ["core", "cache"] }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-linkme = { workspace = true }
 axum = { workspace = true }
 
 [[bin]]

@@ -17,6 +17,6 @@ categories = ["web-programming", "development-tools"]
 proc-macro = true
 
 [dependencies]
-syn = { version = "2", features = ["full", "extra-traits"] }
-quote = "1"
-proc-macro2 = "1"
+syn = { version = "3.0.6", features = ["full", "extra-traits"] }
+quote = "1.0.47"
+proc-macro2 = "1.0.107"

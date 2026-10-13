@@ -1,8 +1,8 @@
 //! 日志初始化：根据配置设置 tracing 输出
 
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::EnvFilter;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 /// 初始化日志系统
 ///
@@ -21,8 +21,7 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 /// - **第三方喧闹 crates**（`tower_http`/`hyper`/`sqlx` 等）：固定 `warn` 级别
 pub fn init(config: &alun_config::LogConfig) {
     let level = &config.level;
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| build_default_filter(level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| build_default_filter(level));
 
     let format = config.format.as_str();
 

@@ -1,0 +1,19 @@
+[package]
+name = "alun-db-macro"
+version.workspace = true
+edition = "2024"
+description = "alun-db 过程宏：Model、Row、TypeMapper 派生与 SQL 模板"
+license = "MIT OR Apache-2.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn       = { version = "3.0.6", features = ["full", "extra-traits"] }
+quote     = "1.0.47"
+proc-macro2 = "1.0.107"
+# 按调用方实际声明的 crate 解析生成代码里的内核路径（只依赖 alun 也能用派生宏）
+proc-macro-crate = "3.5.0"
+
+[dev-dependencies]
+alun-db-core = { version = "0.3.0", path = "../alun-db-core" }

@@ -27,9 +27,7 @@ use ammonia::Builder;
 /// - 图片：`img`（仅 `src`, `alt`, `width`, `height`）
 /// - 容器：`div`, `span`
 pub fn sanitize_html(html: &str) -> String {
-    Builder::default()
-        .clean(html)
-        .to_string()
+    Builder::default().clean(html).to_string()
 }
 
 /// 使用严格规则净化 HTML（仅保留基本文本格式标签）

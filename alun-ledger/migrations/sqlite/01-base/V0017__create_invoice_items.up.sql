@@ -1,0 +1,1 @@
+CREATE TABLE invoice_items (id INTEGER NOT NULL PRIMARY KEY, invoice_id INTEGER NOT NULL, description VARCHAR(255) NOT NULL, quantity INTEGER NOT NULL, unit_price TEXT NOT NULL, amount TEXT NOT NULL, CONSTRAINT fk_invoice_items_invoice FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE)

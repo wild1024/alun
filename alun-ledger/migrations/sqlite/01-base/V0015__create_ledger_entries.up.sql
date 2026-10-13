@@ -1,0 +1,1 @@
+CREATE TABLE ledger_entries (id INTEGER NOT NULL PRIMARY KEY, tenant_id INTEGER NOT NULL, account_id INTEGER NOT NULL, transfer_id INTEGER NOT NULL, amount TEXT NOT NULL, direction VARCHAR(8) NOT NULL, created_at TEXT NOT NULL)

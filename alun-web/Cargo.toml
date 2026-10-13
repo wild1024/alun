@@ -1,7 +1,7 @@
 [package]
 name = "alun-web"
 description = "Alun web layer: router, middleware, extractors, responses, JWT authentication"
-version = "0.1.6"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -14,15 +14,15 @@ keywords = ["web", "framework", "router", "middleware", "jwt"]
 categories = ["web-programming", "authentication"]
 
 [dependencies]
-alun-core = { workspace = true, features = ["web"] }
+alun-core = { workspace = true }
 alun-macros = { workspace = true }
 alun-config = { workspace = true }
 alun-log = { workspace = true }
-alun-db = { workspace = true, optional = true }
+alun-db = { workspace = true, optional = true, default-features = false }
 alun-cache = { workspace = true, optional = true }
 alun-utils = { workspace = true, features = ["validator-integration"] }
 alun-template = { workspace = true, optional = true }
-validator = { version = "0.20", features = ["derive"] }
+validator = { version = "0.21", features = ["derive"] }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
@@ -32,23 +32,68 @@ serde_json = { workspace = true }
 jsonwebtoken = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-tracing-appender = "0.2"
+tracing-appender = "0.2.5"
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
 parking_lot = { workspace = true }
-linkme = { workspace = true }
-toml = "0.8"
-uuid = { version = "1", features = ["v4"] }
-hex = "0.4"
-base64 = "0.22"
-hmac = "0.12"
-sha2 = "0.10"
+# 编译期注册收集（路由 / 权限 / 免鉴权）。替代 `linkme`：不依赖链接器自定义段，
+# 因此在 `--gc-sections`（windows-gnu / mingw ld）下也不会静默丢项（F19）。
+inventory = { workspace = true }
+toml = "1.1"
+uuid = { version = "1.26", features = ["v4"] }
+hex = "0.4.3"
+base64 = "0.23"
+hmac = "0.13"
+sha2 = "0.11"
 chrono = { workspace = true }
+futures-util = { workspace = true, optional = true }
+# F10 可观测性：`metrics` = 埋点门面（HTTP / DB / 缓存），
+# `metrics-exporter-prometheus` = Prometheus 文本导出 + `/metrics` 端点。
+metrics = { workspace = true, optional = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
 
 [features]
 config = []
-db = ["dep:alun-db", "config"]
 cache = ["dep:alun-cache"]
 template = ["dep:alun-template"]
+# SSE（Server-Sent Events）：基于 tokio broadcast 的单向推送辅助，无额外重量依赖。
+sse = ["dep:futures-util"]
+
+# ---- F10 可观测性 ----
+# `metrics`：HTTP 自动埋点（计数器 + 直方图 + 在途 gauge）。
+# 只引入 `metrics` 门面；未安装 recorder 时全部埋点是 no-op，可安全常开。
+# 同时把埋点**下传**到已启用的 DB / 缓存层（`?` = 弱依赖：未启用就不拉）。
+# 否则会出现"HTTP 有指标、DB 没指标"的半套可观测性——比没有更误导。
+metrics = ["dep:metrics", "alun-db?/metrics", "alun-cache?/metrics"]
+# `metrics-prometheus`：额外提供 Prometheus recorder 与受保护的 `/metrics` 端点。
+metrics-prometheus = ["metrics", "dep:metrics-exporter-prometheus"]
+
+# ---- 数据库：能力与驱动**分离**（`db` 不含任何驱动）----
+# `db` 只打开数据库能力 + async 运行时；驱动必须显式选择：
+#   sqlite / postgres / mysql（各自隐含 `db`）。
+db = ["dep:alun-db", "config", "alun-db/async"]
+sqlite = ["db", "alun-db/sqlite"]
+postgres = ["db", "alun-db/postgres"]
+mysql = ["db", "alun-db/mysql"]
+chrono = ["db", "alun-db/chrono"]
+time = ["db", "alun-db/time"]
+jiff = ["db", "alun-db/jiff"]
+rust_decimal = ["db", "alun-db/rust_decimal"]
+bigdecimal = ["db", "alun-db/bigdecimal"]
+uuid = ["db", "alun-db/uuid"]
+ulid = ["db", "alun-db/ulid"]
+json = ["db", "alun-db/json"]
+ipnetwork = ["db", "alun-db/ipnetwork"]
+
+# ---- 工具 ----
+xss = ["alun-utils/xss"]
+
+[dev-dependencies]
+# 单元测试需要真实数据库驱动（`db` feature 本身**不含任何驱动**）：
+# 给测试构建显式开启 SQLite，使 `cargo test -p alun-web --features db` 开箱即用。
+alun-db = { workspace = true, default-features = false, features = ["async", "sqlite"] }
+# F10 测试：`metrics` 埋点需要一个真实 recorder 才能断言指标文本
+# （默认关掉自带 HTTP 监听器，只取 recorder 与 handle）。
+metrics-exporter-prometheus = { workspace = true }

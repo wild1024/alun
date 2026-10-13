@@ -8,7 +8,6 @@
 /// cargo run --example quick-start -- profile=prod     # 指定 profile
 /// ALUN_LOG_LEVEL=debug cargo run --example quick-start # 环境变量覆盖
 /// ```
-
 use alun::prelude::*;
 use alun_utils::StrExt;
 
@@ -18,7 +17,9 @@ use alun_utils::StrExt;
 
 // ──── Handlers ────────────────────────────────────
 
-async fn index() -> &'static str { "🚀 Alun Framework v0.1.0" }
+async fn index() -> &'static str {
+    "🚀 Alun Framework v0.1.0"
+}
 
 async fn health() -> Res<serde_json::Value> {
     Res::ok(serde_json::json!({
@@ -32,7 +33,10 @@ async fn health() -> Res<serde_json::Value> {
 async fn string_demo(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Res<serde_json::Value> {
-    let input = params.get("input").cloned().unwrap_or_else(|| "hello_alun".into());
+    let input = params
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| "hello_alun".into());
     let camel = input.to_camel();
     let snake = input.to_snake();
     let masked = alun_utils::Mask::mobile(&input);
@@ -113,19 +117,15 @@ async fn crypto_demo() -> Res<serde_json::Value> {
 async fn main() -> alun::Result<()> {
     let app = App::from_config()?;
 
-    app
-        .parse_cli()
-
+    app.parse_cli()
         .get("/", index)
         .get("/api/health", health)
-
         .get("/api/demo/strings", string_demo)
         .get("/api/demo/ids", generate_ids)
         .get("/api/demo/date", date_demo)
         .get("/api/demo/mask", mask_demo)
         .get("/api/demo/validate", validate_demo)
         .get("/api/demo/crypto", crypto_demo)
-
         .serve("8080")
         .await
 }

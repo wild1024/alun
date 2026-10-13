@@ -4,9 +4,10 @@
 
 #[cfg(test)]
 mod tests {
-    use alun_config::{AppConfig, ConfigManager, ServerConfig, LogConfig,
-        DatabaseConfig, CacheConfig, MiddlewareConfig, RouterConfig, NotFoundConfig};
-    
+    use alun_config::{
+        AppConfig, CacheConfig, ConfigManager, DatabaseConfig, LogConfig, MiddlewareConfig,
+        NotFoundConfig, RouterConfig, ServerConfig,
+    };
 
     // ──── AppConfig 默认值 ────────────────────────────
 
@@ -134,7 +135,9 @@ mod tests {
 
     #[test]
     fn test_server_config_custom() {
-        let s = ServerConfig { listen: ":3000".into() };
+        let s = ServerConfig {
+            listen: ":3000".into(),
+        };
         assert_eq!(s.listen, ":3000");
     }
 
@@ -300,7 +303,13 @@ listen = "9999"
 
     #[test]
     fn test_router_config_custom_prefix() {
-        let rc = RouterConfig { prefix: "/api/v1".into(), not_found: NotFoundConfig { enabled: true, message: "Not Found".into() } };
+        let rc = RouterConfig {
+            prefix: "/api/v1".into(),
+            not_found: NotFoundConfig {
+                enabled: true,
+                message: "Not Found".into(),
+            },
+        };
         assert_eq!(rc.prefix, "/api/v1");
     }
 

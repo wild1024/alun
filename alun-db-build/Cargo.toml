@@ -1,0 +1,8 @@
+[package]
+name = "alun-db-build"
+version.workspace = true
+edition = "2024"
+description = "Alun DB build.rs helper: parse SQL migration files into a schema snapshot"
+license = "MIT OR Apache-2.0"
+
+[dependencies]

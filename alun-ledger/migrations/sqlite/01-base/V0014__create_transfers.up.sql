@@ -1,0 +1,1 @@
+CREATE TABLE transfers (id INTEGER NOT NULL PRIMARY KEY, tenant_id INTEGER NOT NULL, from_account INTEGER NOT NULL, to_account INTEGER NOT NULL, amount TEXT NOT NULL, status VARCHAR(16) NOT NULL, created_at TEXT NOT NULL)

@@ -1,7 +1,7 @@
 //! 短 ID 生成器：基于 UUID v4/v7 或雪花算法
 
-use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 /// 短 ID 生成器
 ///
@@ -10,7 +10,9 @@ pub struct Sid;
 
 impl Sid {
     /// 标准格式 UUID（36 字符，含连字符）
-    pub fn uuid() -> String { Uuid::new_v4().to_string() }
+    pub fn uuid() -> String {
+        Uuid::new_v4().to_string()
+    }
 
     /// 短 ID（16 位 hex）
     pub fn short() -> String {
@@ -44,9 +46,15 @@ impl Sid {
 mod tests {
     use super::*;
     #[test]
-    fn test_short() { assert_eq!(Sid::short().len(), 16); }
+    fn test_short() {
+        assert_eq!(Sid::short().len(), 16);
+    }
     #[test]
-    fn test_tiny() { assert_eq!(Sid::tiny().len(), 8); }
+    fn test_tiny() {
+        assert_eq!(Sid::tiny().len(), 8);
+    }
     #[test]
-    fn test_uuid() { assert_eq!(Sid::uuid().len(), 36); }
+    fn test_uuid() {
+        assert_eq!(Sid::uuid().len(), 36);
+    }
 }

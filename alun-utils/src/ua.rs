@@ -22,7 +22,9 @@ pub struct UaInfo {
 pub fn parse_user_agent(ua: &str) -> UaInfo {
     let ua_lower = ua.to_lowercase();
 
-    let device_type = if ua_lower.contains("mobile") || ua_lower.contains("android") && !ua_lower.contains("tablet") {
+    let device_type = if ua_lower.contains("mobile")
+        || ua_lower.contains("android") && !ua_lower.contains("tablet")
+    {
         "MOBILE".to_string()
     } else if ua_lower.contains("ipad") || ua_lower.contains("tablet") {
         "TABLET".to_string()
@@ -44,19 +46,24 @@ pub fn parse_user_agent(ua: &str) -> UaInfo {
 
     let os_type = if ua_lower.contains("windows") {
         "Windows".to_string()
+    } else if ua_lower.contains("ios") || ua_lower.contains("iphone") || ua_lower.contains("ipad") {
+        // iOS UA 常含 "like Mac OS X"，需先于 mac os 匹配
+        "iOS".to_string()
     } else if ua_lower.contains("mac os") || ua_lower.contains("macos") {
         "macOS".to_string()
     } else if ua_lower.contains("linux") && !ua_lower.contains("android") {
         "Linux".to_string()
     } else if ua_lower.contains("android") {
         "Android".to_string()
-    } else if ua_lower.contains("ios") || ua_lower.contains("iphone") || ua_lower.contains("ipad") {
-        "iOS".to_string()
     } else {
         "Unknown".to_string()
     };
 
-    UaInfo { device_type, browser_type, os_type }
+    UaInfo {
+        device_type,
+        browser_type,
+        os_type,
+    }
 }
 
 #[cfg(test)]
@@ -65,7 +72,9 @@ mod tests {
 
     #[test]
     fn test_chrome_windows() {
-        let info = parse_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        let info = parse_user_agent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        );
         assert_eq!(info.device_type, "PC");
         assert_eq!(info.browser_type, "Chrome");
         assert_eq!(info.os_type, "Windows");
@@ -73,7 +82,9 @@ mod tests {
 
     #[test]
     fn test_firefox_mac() {
-        let info = parse_user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/121.0");
+        let info = parse_user_agent(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/121.0",
+        );
         assert_eq!(info.device_type, "PC");
         assert_eq!(info.browser_type, "Firefox");
         assert_eq!(info.os_type, "macOS");
@@ -81,7 +92,9 @@ mod tests {
 
     #[test]
     fn test_mobile_chrome_android() {
-        let info = parse_user_agent("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
+        let info = parse_user_agent(
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        );
         assert_eq!(info.device_type, "MOBILE");
         assert_eq!(info.browser_type, "Chrome");
         assert_eq!(info.os_type, "Android");
@@ -89,7 +102,9 @@ mod tests {
 
     #[test]
     fn test_safari_ios() {
-        let info = parse_user_agent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1");
+        let info = parse_user_agent(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        );
         assert_eq!(info.device_type, "MOBILE");
         assert_eq!(info.browser_type, "Safari");
         assert_eq!(info.os_type, "iOS");

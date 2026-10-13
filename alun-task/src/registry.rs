@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::handler::TaskHandler;
 use crate::TaskConfig;
+use crate::handler::TaskHandler;
 
 /// 处理器注册中心
 ///
@@ -32,7 +32,8 @@ impl HandlerRegistry {
         if task_type != config.task_type {
             tracing::warn!(
                 "Handler task_type ({}) 与 config.task_type ({}) 不一致，将使用 config 中的值",
-                task_type, config.task_type
+                task_type,
+                config.task_type
             );
         }
         self.handlers
@@ -42,10 +43,10 @@ impl HandlerRegistry {
 
     /// 从编译期自动发现的 handler 注册（配合 `#[task_handler]` 宏）
     ///
-    /// 读取 `TASK_HANDLERS` 分布式切片中的所有条目并注册。
+    /// 遍历 [`crate::discovered_task_handlers`]（由 `inventory` 收集）并注册。
     /// 可安全调用多次（后续条目覆盖先前的同名 task_type）。
     pub fn from_discovered(&mut self) -> &mut Self {
-        for entry in crate::TASK_HANDLERS {
+        for entry in crate::discovered_task_handlers() {
             let handler = (entry.handler_fn)();
             let config = (entry.config_fn)();
             self.handlers

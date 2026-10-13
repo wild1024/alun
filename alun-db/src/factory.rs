@@ -1,137 +1,123 @@
-//! 数据库工厂：从 DatabaseConfig 创建连接池
-//!
-//! - 支持 PostgreSQL / MySQL / SQLite
-//! - 支持加密密码（base64(AES-GCM) 解密）
-//! - 自动连接测试
-//! - 连接池参数配置
+//! 数据库驱动工厂。按配置自动选择驱动。
 
-use crate::{Db, DbResult, DbError};
-use alun_config::DatabaseConfig;
-use tracing::info;
+use std::sync::Arc;
 
-/// 从配置创建 Db 实例 + 连接测试
-///
-/// 根据 `DatabaseConfig.type` 自动选择 PostgreSQL/MySQL/SQLite 后端，
-/// 支持加密密码自动解密，创建后立即执行 `SELECT 1` 连接测试。
-pub async fn create_db(config: &DatabaseConfig) -> DbResult<Db> {
-    if !config.enabled {
-        return Err(DbError::Other("数据库未启用".into()));
+use alun_db_core::error::{DbError, Result};
+use alun_db_core::traits::driver::Driver;
+
+use crate::config::DatabaseConfig;
+use crate::executor::RawExecutor;
+
+impl From<crate::config::PoolConfig> for alun_db_core::traits::driver::PoolConfig {
+    fn from(c: crate::config::PoolConfig) -> Self {
+        Self {
+            max_connections: c.max_connections,
+            min_connections: c.min_connections,
+            connect_timeout: c.connect_timeout,
+            idle_timeout: c.idle_timeout,
+            max_lifetime: c.max_lifetime,
+        }
     }
+}
 
-    let password = if config.password_encrypted && !config.password.is_empty() {
-        decrypt_password(&config.password)?
-    } else {
-        config.password.clone()
+/// 根据配置创建驱动执行器。
+///
+/// 仅 facade 内部使用（`Db::connect*` 的工厂入口），不对外暴露
+/// 内部的 `RawExecutor` 类型。连接建立成功后记录脱敏连接日志，
+/// 便于排查而不泄露密码。
+pub(crate) async fn create_driver(config: &DatabaseConfig) -> Result<Arc<dyn RawExecutor>> {
+    let executor: Arc<dyn RawExecutor> = match config.db_type.as_str() {
+        #[cfg(feature = "sqlite")]
+        "sqlite" => {
+            let driver = alun_db_driver_sqlite::SqliteDriver;
+            Arc::new(
+                driver
+                    .connect(&config.url, config.pool.clone().into())
+                    .await?,
+            )
+        }
+
+        #[cfg(feature = "postgres")]
+        "postgres" | "postgresql" => {
+            let driver = alun_db_driver_postgres::PostgresDriver;
+            Arc::new(
+                driver
+                    .connect(&config.url, config.pool.clone().into())
+                    .await?,
+            )
+        }
+
+        #[cfg(feature = "mysql")]
+        "mysql" => {
+            let driver = alun_db_driver_mysql::MysqlDriver;
+            Arc::new(
+                driver
+                    .connect(&config.url, config.pool.clone().into())
+                    .await?,
+            )
+        }
+
+        other => {
+            return Err(DbError::UnsupportedFeature {
+                feature: "driver",
+                dialect: other.to_string(),
+            });
+        }
     };
 
-    let url = build_connection_url(config, &password);
-
-    info!("数据库连接: {}:{}@{}:{}/{}",
-        config.user, "***", config.host,
-        config.port.unwrap_or(default_port(&config.r#type)),
-        config.name,
+    tracing::info!(
+        db_type = %config.db_type,
+        url = %sanitize_url(&config.url),
+        "database connection established"
     );
-
-    match config.r#type.as_str() {
-        "postgres" | "postgresql" => {
-            let pool = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(config.max_connections)
-                .min_connections(config.min_connections)
-                .connect(&url).await?;
-            test_connection_pg(&pool).await?;
-            Ok(Db::postgres(pool))
-        }
-        "mysql" => {
-            let pool = sqlx::mysql::MySqlPoolOptions::new()
-                .max_connections(config.max_connections)
-                .min_connections(config.min_connections)
-                .connect(&url).await?;
-            test_connection_mysql(&pool).await?;
-            Ok(Db::mysql(pool))
-        }
-        "sqlite" => {
-            let pool = sqlx::sqlite::SqlitePoolOptions::new()
-                .max_connections(config.max_connections)
-                .connect(&url).await?;
-            test_connection_sqlite(&pool).await?;
-            Ok(Db::sqlite(pool))
-        }
-        other => Err(DbError::Argument(format!("不支持的数据库类型: {}", other))),
-    }
+    Ok(executor)
 }
 
-/// 仅当数据库启用时创建，否则返回 None
-pub async fn create_db_if_enabled(config: &DatabaseConfig) -> Option<DbResult<Db>> {
-    if !config.enabled { return None; }
-    Some(create_db(config).await)
-}
-
-fn default_port(db_type: &str) -> u16 {
-    match db_type {
-        "postgres" | "postgresql" => 5432,
-        "mysql" => 3306,
-        _ => 0,
-    }
-}
-
-async fn test_connection_pg(pool: &sqlx::PgPool) -> DbResult<()> {
-    let row: (i32,) = sqlx::query_as("SELECT 1").fetch_one(pool).await?;
-    info!("PostgreSQL 连接测试通过: result={}", row.0);
-    Ok(())
-}
-
-async fn test_connection_mysql(pool: &sqlx::MySqlPool) -> DbResult<()> {
-    let row: (i32,) = sqlx::query_as("SELECT 1").fetch_one(pool).await?;
-    info!("MySQL 连接测试通过: result={}", row.0);
-    Ok(())
-}
-
-async fn test_connection_sqlite(pool: &sqlx::SqlitePool) -> DbResult<()> {
-    let row: (i32,) = sqlx::query_as("SELECT 1").fetch_one(pool).await?;
-    info!("SQLite 连接测试通过: result={}", row.0);
-    Ok(())
-}
-
-fn build_connection_url(config: &DatabaseConfig, password: &str) -> String {
-    let port = config.port.unwrap_or(default_port(&config.r#type));
-
-    match config.r#type.as_str() {
-        "postgres" | "postgresql" => {
-            let base = format!(
-                "postgres://{}:{}@{}:{}/{}",
-                config.user, password, config.host, port, config.name
-            );
-            // 追加 sslmode 参数：非空时拼接到连接 URL，控制是否强制加密传输
-            // 默认 "prefer"：尝试 SSL，失败回退明文；生产环境应设为 "require"
-            if config.ssl_mode.is_empty() {
-                base
-            } else {
-                format!("{}?sslmode={}", base, config.ssl_mode)
-            }
-        }
-        "mysql" => format!(
-            "mysql://{}:{}@{}:{}/{}",
-            config.user, password, config.host, port, config.name
+/// 脱敏连接 URL：隐藏 URL 中的密码段，避免日志泄露凭据。
+///
+/// 仅对 `scheme://user:pass@host/...` 形式脱敏；无密码段时原样返回。
+pub(crate) fn sanitize_url(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let rest = &url[scheme_end + 3..];
+    let Some(at_pos) = rest.find('@') else {
+        return url.to_string();
+    };
+    let userinfo = &rest[..at_pos];
+    match userinfo.find(':') {
+        Some(colon) => format!(
+            "{}://{}:***@{}",
+            &url[..scheme_end],
+            &userinfo[..colon],
+            &rest[at_pos + 1..]
         ),
-        "sqlite" => format!("sqlite:{}", config.name),
-        _ => format!("postgres://{}:{}@{}:{}/{}", config.user, password, config.host, port, config.name),
+        None => url.to_string(),
     }
 }
 
-fn decrypt_password(encrypted: &str) -> DbResult<String> {
-    let key = get_secret_key();
-    let parts: Vec<&str> = encrypted.split(':').collect();
-    if parts.len() != 2 {
-        return Err(DbError::Argument("加密密码格式错误，期望 base64_iv:base64_ciphertext".into()));
-    }
-    alun_utils::crypto::Crypto::aes_decrypt(&key, parts[1], parts[0])
-        .ok_or_else(|| DbError::Argument("密码解密失败".into()))
-}
+#[cfg(test)]
+mod tests {
+    use super::sanitize_url;
 
-fn get_secret_key() -> Vec<u8> {
-    std::env::var("ALUN_SECRET_KEY")
-        .ok()
-        .and_then(|s| hex::decode(&s).ok())
-        .filter(|k| k.len() == 32)
-        .unwrap_or_else(|| vec![0u8; 32])
+    #[test]
+    fn sanitize_hides_password() {
+        assert_eq!(
+            sanitize_url("postgres://user:secret@localhost:5432/db"),
+            "postgres://user:***@localhost:5432/db"
+        );
+    }
+
+    #[test]
+    fn sanitize_keeps_url_without_password() {
+        assert_eq!(
+            sanitize_url("postgres://user@localhost:5432/db"),
+            "postgres://user@localhost:5432/db"
+        );
+    }
+
+    #[test]
+    fn sanitize_keeps_sqlite_url() {
+        assert_eq!(sanitize_url("sqlite://./dev.db"), "sqlite://./dev.db");
+    }
 }

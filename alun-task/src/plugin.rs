@@ -3,18 +3,18 @@
 //! 实现 `alun_core::Plugin` trait，通过 `PluginManager` 管理生命周期。
 //! 不持有任何数据库连接——持久化通过 `TaskStorage` trait 委托给业务方。
 
-use std::sync::Arc;
-use async_trait::async_trait;
 use alun_core::{Plugin, Result as CoreResult};
+use async_trait::async_trait;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tracing::{info, error};
+use tracing::{error, info};
 
-use crate::storage::TaskStorage;
 use crate::HandlerRegistry;
-use crate::TaskWorker;
 use crate::RetryScanner;
 use crate::TaskMetrics;
+use crate::TaskWorker;
 use crate::TaskWorkerConfig;
+use crate::storage::TaskStorage;
 
 /// 任务插件
 ///
@@ -92,7 +92,8 @@ impl TaskPlugin {
     }
 
     fn signal_stop(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.running
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     async fn wait_for_tasks(&self) {
@@ -118,7 +119,8 @@ impl Plugin for TaskPlugin {
 
     /// 启动插件：在后台 tokio task 中启动 Worker 和 RetryScanner
     async fn start(&self) -> CoreResult<()> {
-        self.running.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.running
+            .store(true, std::sync::atomic::Ordering::Relaxed);
 
         let topics = self.topics.clone();
         let running = Arc::clone(&self.running);
@@ -136,7 +138,13 @@ impl Plugin for TaskPlugin {
                 let w_config_clone = w_config.clone();
                 let w_storage_clone = Arc::clone(&w_storage);
                 let w_registry_clone = w_registry.clone();
-                let worker = match TaskWorker::new(w_config_clone, w_storage_clone, w_registry_clone, w_metrics, &w_topics) {
+                let worker = match TaskWorker::new(
+                    w_config_clone,
+                    w_storage_clone,
+                    w_registry_clone,
+                    w_metrics,
+                    &w_topics,
+                ) {
                     Ok(w) => Arc::new(w),
                     Err(e) => {
                         error!("TaskWorker 创建失败: {}", e);
@@ -173,15 +181,15 @@ impl Plugin for TaskPlugin {
             let s_running = Arc::clone(&running);
 
             tokio::spawn(async move {
-                let scanner = match RetryScanner::new(
-                    &s_brokers, s_storage, s_registry, s_interval, s_batch,
-                ) {
-                    Ok(s) => Arc::new(s),
-                    Err(e) => {
-                        error!("RetryScanner 创建失败: {}", e);
-                        return;
-                    }
-                };
+                let scanner =
+                    match RetryScanner::new(&s_brokers, s_storage, s_registry, s_interval, s_batch)
+                    {
+                        Ok(s) => Arc::new(s),
+                        Err(e) => {
+                            error!("RetryScanner 创建失败: {}", e);
+                            return;
+                        }
+                    };
 
                 let scanner_ref = Arc::clone(&scanner);
 

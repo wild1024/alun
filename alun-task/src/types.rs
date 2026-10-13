@@ -230,3 +230,24 @@ pub struct TaskMessage {
     /// 任务提交时间（ISO 8601 格式）
     pub submitted_at: String,
 }
+
+/// 计算重试延迟（秒）。
+///
+/// 纯策略函数——不依赖任何 I/O 后端，因此无条件可用（与 Kafka 解耦）。
+///
+/// # 参数
+///
+/// - `strategy`：退避策略（固定 / 线性 / 指数）
+/// - `base`：基准延迟秒数
+/// - `max`：延迟上限秒数
+/// - `attempt`：已重试次数（从 0 开始）
+pub fn compute_retry_delay(strategy: &RetryStrategy, base: u64, max: u64, attempt: u32) -> u64 {
+    match strategy {
+        RetryStrategy::Fixed => base,
+        RetryStrategy::Linear => (base * (attempt + 1) as u64).min(max),
+        RetryStrategy::Exponential => {
+            let delay = base * 2u64.pow(attempt);
+            delay.min(max)
+        }
+    }
+}

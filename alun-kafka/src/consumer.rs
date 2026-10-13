@@ -1,5 +1,5 @@
-use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::ClientConfig;
+use rdkafka::consumer::{Consumer, StreamConsumer};
 use tracing::info;
 
 /// Kafka 流式消费者（基于 rdkafka StreamConsumer）
@@ -26,11 +26,12 @@ impl KafkaConsumer {
             .create()
             .expect("Kafka Consumer 创建失败");
 
-        consumer
-            .subscribe(topics)
-            .expect("Kafka 订阅主题失败");
+        consumer.subscribe(topics).expect("Kafka 订阅主题失败");
 
-        info!("Kafka Consumer 已连接: {}, group={}, topics={:?}", brokers, group_id, topics);
+        info!(
+            "Kafka Consumer 已连接: {}, group={}, topics={:?}",
+            brokers, group_id, topics
+        );
         Self { inner: consumer }
     }
 
@@ -45,7 +46,7 @@ impl KafkaConsumer {
     ) -> Self {
         let mut cfg = ClientConfig::new();
         cfg.set("bootstrap.servers", brokers)
-           .set("group.id", group_id);
+            .set("group.id", group_id);
 
         for (key, value) in configs {
             cfg.set(*key, *value);
@@ -53,14 +54,17 @@ impl KafkaConsumer {
 
         let consumer: StreamConsumer = cfg.create().expect("Kafka Consumer 创建失败");
 
-        consumer
-            .subscribe(topics)
-            .expect("Kafka 订阅主题失败");
+        consumer.subscribe(topics).expect("Kafka 订阅主题失败");
 
-        info!("Kafka Consumer 已连接: {}, group={}, topics={:?}", brokers, group_id, topics);
+        info!(
+            "Kafka Consumer 已连接: {}, group={}, topics={:?}",
+            brokers, group_id, topics
+        );
         Self { inner: consumer }
     }
 
     /// 获取底层 rdkafka StreamConsumer 引用（用于流式消费）
-    pub fn inner(&self) -> &StreamConsumer { &self.inner }
+    pub fn inner(&self) -> &StreamConsumer {
+        &self.inner
+    }
 }

@@ -1,8 +1,8 @@
-use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
+use rdkafka::producer::{FutureProducer, FutureRecord};
 use serde::Serialize;
 use std::time::Duration;
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// Kafka 异步生产者（基于 rdkafka FutureProducer）
 ///
@@ -52,7 +52,8 @@ impl KafkaProducer {
         key: &str,
         payload: &T,
     ) -> Result<(), KafkaError> {
-        let value = serde_json::to_string(payload).map_err(|e| KafkaError::Serialize(e.to_string()))?;
+        let value =
+            serde_json::to_string(payload).map_err(|e| KafkaError::Serialize(e.to_string()))?;
 
         let record = FutureRecord::to(topic).key(key).payload(&value);
 
@@ -71,7 +72,12 @@ impl KafkaProducer {
     /// 发送原始字节消息
     ///
     /// 适用于 Protobuf 等二进制序列化格式。
-    pub async fn send_bytes(&self, topic: &str, key: &str, payload: &[u8]) -> Result<(), KafkaError> {
+    pub async fn send_bytes(
+        &self,
+        topic: &str,
+        key: &str,
+        payload: &[u8],
+    ) -> Result<(), KafkaError> {
         let record = FutureRecord::to(topic).key(key).payload(payload);
 
         self.inner

@@ -1,7 +1,7 @@
 //! 异步任务插件：后台任务队列
 
-use async_trait::async_trait;
 use alun_core::{Plugin, Result};
+use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -43,12 +43,16 @@ impl AsyncTaskPlugin {
     }
 
     /// 工作线程数
-    pub fn worker_count(&self) -> usize { self.workers }
+    pub fn worker_count(&self) -> usize {
+        self.workers
+    }
 }
 
 #[async_trait]
 impl Plugin for AsyncTaskPlugin {
-    fn name(&self) -> &str { "async-task" }
+    fn name(&self) -> &str {
+        "async-task"
+    }
 
     async fn start(&self) -> Result<()> {
         *self.running.lock() = true;

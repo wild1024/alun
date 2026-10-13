@@ -1,0 +1,36 @@
+# CI 用数据库容器（《测试项目测试规划.md》§4.2）。
+#
+#   cd alun-ledger/ci && docker compose up -d
+#
+# 与需求文档/规划中的默认连接串一致：
+#   postgres://alun:alun@localhost:5432/alun_test
+#   mysql://alun:alun@localhost:3306/alun_test
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: alun
+      POSTGRES_PASSWORD: alun
+      POSTGRES_DB: alun_test
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alun -d alun_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_USER: alun
+      MYSQL_PASSWORD: alun
+      MYSQL_DATABASE: alun_test
+      MYSQL_ROOT_PASSWORD: alun
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -ualun -palun"]
+      interval: 3s
+      timeout: 3s
+      retries: 30

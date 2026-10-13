@@ -27,11 +27,11 @@
 //! let no = backend.generate("order").await?; // ORD2024052400000001
 //! ```
 
+use async_trait::async_trait;
+use chrono::{Datelike, Local};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use async_trait::async_trait;
-use chrono::{Local, Datelike};
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 // ──── 错误类型 ────────────────────────────────────
@@ -100,15 +100,13 @@ impl CyclePeriod {
 /// 增量方式
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum IncrementStrategy {
     /// 顺序递增（步长 1）
+    #[default]
     Sequential,
     /// 随机增量——在 `[1, max]` 范围内随机跳动
     Random { max: u64 },
-}
-
-impl Default for IncrementStrategy {
-    fn default() -> Self { Self::Sequential }
 }
 
 // ──── 单号规则 ────────────────────────────────────
@@ -138,8 +136,12 @@ pub struct SerialRule {
     pub is_enabled: bool,
 }
 
-fn default_initial_value() -> u64 { 1 }
-fn default_true() -> bool { true }
+fn default_initial_value() -> u64 {
+    1
+}
+fn default_true() -> bool {
+    true
+}
 
 impl SerialRule {
     /// 创建新规则（默认启用）
@@ -239,7 +241,8 @@ impl FormatEngine {
                 }
                 if j >= len {
                     return Err(SerialError::FormatError(format!(
-                        "未闭合的 '{{': 位置 {} 格式 '{}'", i, format
+                        "未闭合的 '{{': 位置 {} 格式 '{}'",
+                        i, format
                     )));
                 }
                 let token: String = chars[i + 1..j].iter().collect();
@@ -287,7 +290,8 @@ impl FormatEngine {
                     Ok(FormatSegment::Random(width))
                 } else {
                     Err(SerialError::FormatError(format!(
-                        "未知占位符: '{{{}}}' 在格式 '{}'", token, full_format
+                        "未知占位符: '{{{}}}' 在格式 '{}'",
+                        token, full_format
                     )))
                 }
             }
@@ -299,10 +303,9 @@ impl FormatEngine {
     /// - `seq`: 序列号值
     /// - `ts`: 可选的时间戳（秒），无则使用当前时间
     pub fn render(&self, seq: u64, ts: Option<i64>) -> String {
-        let now = ts.and_then(|t| chrono::DateTime::from_timestamp(t, 0))
-            .unwrap_or_else(|| {
-                Local::now().naive_local().and_utc()
-            });
+        let now = ts
+            .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+            .unwrap_or_else(|| Local::now().naive_local().and_utc());
 
         let mut result = String::new();
         for seg in &self.segments {
@@ -370,9 +373,7 @@ pub trait SerialGenerator: Send + Sync {
     async fn generate(&self, rule_key: &str) -> Result<String, SerialError>;
 
     /// 批量生成单号
-    async fn batch_generate(
-        &self, rule_key: &str, count: u32,
-    ) -> Result<Vec<String>, SerialError>;
+    async fn batch_generate(&self, rule_key: &str, count: u32) -> Result<Vec<String>, SerialError>;
 
     /// 预览下一个单号（不消耗计数器）
     async fn peek(&self, rule_key: &str) -> Result<String, SerialError>;
@@ -391,7 +392,10 @@ pub trait SerialGenerator: Send + Sync {
 
     /// 查询生成记录（分页），返回 (记录列表, 总数)
     async fn query_records(
-        &self, rule_key: &str, page: u64, page_size: u64,
+        &self,
+        rule_key: &str,
+        page: u64,
+        page_size: u64,
     ) -> Result<(Vec<SerialRecord>, u64), SerialError>;
 
     /// 获取所有已注册的规则
@@ -452,30 +456,33 @@ impl MemorySerialBackend {
         }
     }
 
-    async fn get_or_init_counter(
-        &self, rule: &SerialRule,
-    ) -> Result<(String, u64), SerialError> {
+    async fn get_or_init_counter(&self, rule: &SerialRule) -> Result<(String, u64), SerialError> {
         let cycle_val = rule.cycle.current_value();
         let ck = Self::counter_key(&rule.key, &cycle_val);
 
         let mut counters = self.counters.lock().await;
-        if let Some(state) = counters.get(&ck) {
-            if state.cycle == cycle_val {
-                return Ok((ck, state.value));
-            }
+        if let Some(state) = counters.get(&ck)
+            && state.cycle == cycle_val
+        {
+            return Ok((ck, state.value));
         }
 
         let init = rule.initial_value;
         counters.insert(
             ck.clone(),
-            CounterState { value: init, cycle: cycle_val },
+            CounterState {
+                value: init,
+                cycle: cycle_val,
+            },
         );
         Ok((ck, init))
     }
 }
 
 impl Default for MemorySerialBackend {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
@@ -517,7 +524,8 @@ impl SerialGenerator for MemorySerialBackend {
         let max_val = 10u64.pow(seq_width).saturating_sub(1);
         if next_val > max_val {
             return Err(SerialError::CounterOverflow(format!(
-                "规则 '{}' 序列号溢出: {} > 最大值 {}", rule_key, next_val, max_val
+                "规则 '{}' 序列号溢出: {} > 最大值 {}",
+                rule_key, next_val, max_val
             )));
         }
 
@@ -547,9 +555,7 @@ impl SerialGenerator for MemorySerialBackend {
         Ok(serial_no)
     }
 
-    async fn batch_generate(
-        &self, rule_key: &str, count: u32,
-    ) -> Result<Vec<String>, SerialError> {
+    async fn batch_generate(&self, rule_key: &str, count: u32) -> Result<Vec<String>, SerialError> {
         let mut result = Vec::with_capacity(count as usize);
         for _ in 0..count {
             result.push(self.generate(rule_key).await?);
@@ -579,7 +585,10 @@ impl SerialGenerator for MemorySerialBackend {
 
         let current_val = {
             let counters = self.counters.lock().await;
-            counters.get(&ck).map(|s| s.value).unwrap_or(rule.initial_value)
+            counters
+                .get(&ck)
+                .map(|s| s.value)
+                .unwrap_or(rule.initial_value)
         };
 
         Ok(engine.render(current_val, None))
@@ -618,18 +627,23 @@ impl SerialGenerator for MemorySerialBackend {
     }
 
     async fn query_records(
-        &self, rule_key: &str, page: u64, page_size: u64,
+        &self,
+        rule_key: &str,
+        page: u64,
+        page_size: u64,
     ) -> Result<(Vec<SerialRecord>, u64), SerialError> {
         let records = self.records.lock().await;
-        let filtered: Vec<&SerialRecord> = records
-            .iter()
-            .filter(|r| r.rule_key == rule_key)
-            .collect();
+        let filtered: Vec<&SerialRecord> =
+            records.iter().filter(|r| r.rule_key == rule_key).collect();
         let total = filtered.len() as u64;
         let offset = ((page.saturating_sub(1)) * page_size) as usize;
         let data: Vec<SerialRecord> = filtered
-            .into_iter().rev()
-            .skip(offset).take(page_size as usize).cloned().collect();
+            .into_iter()
+            .rev()
+            .skip(offset)
+            .take(page_size as usize)
+            .cloned()
+            .collect();
         Ok((data, total))
     }
 
@@ -682,7 +696,10 @@ mod tests {
     #[tokio::test]
     async fn test_memory_generate_simple() {
         let backend = MemorySerialBackend::new();
-        backend.register_rule(SerialRule::new("t", "T{SEQ:4}").with_initial_value(1)).await.unwrap();
+        backend
+            .register_rule(SerialRule::new("t", "T{SEQ:4}").with_initial_value(1))
+            .await
+            .unwrap();
         assert_eq!(backend.generate("t").await.unwrap(), "T0001");
         assert_eq!(backend.generate("t").await.unwrap(), "T0002");
     }
@@ -690,7 +707,9 @@ mod tests {
     #[tokio::test]
     async fn test_memory_daily_cycle() {
         let backend = MemorySerialBackend::new();
-        let rule = SerialRule::new("d", "{SEQ:3}").with_cycle(CyclePeriod::Daily).with_initial_value(1);
+        let rule = SerialRule::new("d", "{SEQ:3}")
+            .with_cycle(CyclePeriod::Daily)
+            .with_initial_value(1);
         backend.register_rule(rule).await.unwrap();
         assert_eq!(backend.generate("d").await.unwrap(), "001");
         assert_eq!(backend.generate("d").await.unwrap(), "002");
@@ -699,7 +718,10 @@ mod tests {
     #[tokio::test]
     async fn test_memory_peek() {
         let backend = MemorySerialBackend::new();
-        backend.register_rule(SerialRule::new("p", "{SEQ:3}").with_initial_value(100)).await.unwrap();
+        backend
+            .register_rule(SerialRule::new("p", "{SEQ:3}").with_initial_value(100))
+            .await
+            .unwrap();
         assert_eq!(backend.peek("p").await.unwrap(), "100");
         assert_eq!(backend.generate("p").await.unwrap(), "100");
     }
@@ -707,7 +729,10 @@ mod tests {
     #[tokio::test]
     async fn test_memory_register_remove() {
         let backend = MemorySerialBackend::new();
-        backend.register_rule(SerialRule::new("tmp", "{SEQ:2}")).await.unwrap();
+        backend
+            .register_rule(SerialRule::new("tmp", "{SEQ:2}"))
+            .await
+            .unwrap();
         assert!(backend.list_rules().await.unwrap().len() == 1);
         backend.remove_rule("tmp").await.unwrap();
         assert!(backend.list_rules().await.unwrap().is_empty());

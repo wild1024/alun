@@ -4,33 +4,37 @@ description = "Alun framework comprehensive test suite - functional tests and re
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
-alun = { path = "../../alun", features = ["db", "cache", "template", "fs", "config"] }
-alun-core = { workspace = true, features = ["web"] }
-alun-web = { workspace = true, features = ["db", "cache", "template", "config"] }
-alun-db = { workspace = true }
+# `default-features = false`：本套件只用 `alun-web` 及各分层 crate，不使用
+# `task` / `kafka`。若不关闭默认特性，会被默认集拉入 `alun-kafka`
+# （librdkafka 需完整 Unix 构建链），导致在受限环境下无法运行。
+#
+# 注意：`sqlite` 必须显式声明——`db` 只是"数据库能力"，**不再隐含驱动**。
+alun = { path = "../../alun", default-features = false, features = ["sqlite", "cache", "template", "fs-local", "config"] }
+alun-core = { workspace = true }
+alun-web = { workspace = true, features = ["sqlite", "cache", "template", "config"] }
+alun-db = { workspace = true, features = ["sqlite"] }
 alun-cache = { workspace = true }
 alun-config = { workspace = true }
 alun-template = { workspace = true }
 alun-fs = { workspace = true }
-alun-utils = { workspace = true, features = ["validator-integration"] }
+alun-utils = { workspace = true, features = ["validator-integration", "xlsx"] }
 alun-macros = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
-validator = { version = "0.20", features = ["derive"] }
+validator = { version = "0.21", features = ["derive"] }
 chrono = { workspace = true }
 jsonwebtoken = { workspace = true }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1.26", features = ["v4"] }
 tower = { workspace = true }
 http = { workspace = true }
 anyhow = { workspace = true }
-regex = "1"
-rand = "0.8"
+regex = "1.13"
+rand = "0.10"
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
-linkme = { workspace = true }
-toml = "0.8"
+toml = "1.1"

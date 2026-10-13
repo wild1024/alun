@@ -4,17 +4,17 @@
 
 #[cfg(test)]
 mod tests {
-    use alun_web::router::AlunRouter;
-    use alun_web::middleware::TokenClaims;
-    use alun_web::jwt::JWT;
-    use alun_web::App;
     use alun_config::{AppConfig, ConfigManager};
-    use alun_core::api::Res;
+    use alun_web::api::Res;
+    use alun_web::App;
+    use alun_web::jwt::JWT;
+    use alun_web::middleware::TokenClaims;
+    use alun_web::router::AlunRouter;
     use axum::Router;
-    use axum::http::{StatusCode, Request};
     use axum::body::Body;
-    use tower::ServiceExt;
+    use axum::http::{Request, StatusCode};
     use std::sync::Arc;
+    use tower::ServiceExt;
 
     // ──── AlunRouter ─────────────────────────────────
 
@@ -111,7 +111,12 @@ mod tests {
 
         let app: Router = router.into_axum();
         let resp = app
-            .oneshot(Request::builder().uri("/nonexistent").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/nonexistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -131,6 +136,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 1700000000,
+            extra: Default::default(),
         };
         assert_eq!(claims.user_id(), "user_001");
     }
@@ -146,6 +152,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(claims.has_role("admin"));
         assert!(claims.has_role("moderator"));
@@ -163,6 +170,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(claims.has_any_role(&["admin", "viewer"]));
         assert!(!claims.has_any_role(&["admin", "editor"]));
@@ -179,6 +187,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(claims.has_all_roles(&["a", "b"]));
         assert!(!claims.has_all_roles(&["a", "d"]));
@@ -195,6 +204,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(claims.has_permission("user:read"));
         assert!(!claims.has_permission("admin:access"));
@@ -211,6 +221,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(claims.has_any_permission(&["write", "read"]));
         assert!(!claims.has_any_permission(&["write", "delete"]));
@@ -227,6 +238,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(claims.is_super_admin());
 
@@ -239,6 +251,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(claims2.is_super_admin());
 
@@ -251,6 +264,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(!claims3.is_super_admin());
     }
@@ -266,6 +280,7 @@ mod tests {
             token_type: None,
             exp: 9999999999,
             iat: 0,
+            extra: Default::default(),
         };
         assert!(claims.has_permission("anything"));
         assert!(claims.has_any_permission(&["anything", "else"]));
@@ -309,12 +324,9 @@ mod tests {
     #[test]
     fn test_jwt_create_and_validate() {
         let jwt = JWT::with_config(jwt_test_config());
-        let token_str = jwt.create_access_token(
-            "user-1",
-            Some("bob"),
-            &["user".into()],
-            &["read".into()],
-        ).unwrap();
+        let token_str = jwt
+            .create_access_token("user-1", Some("bob"), &["user".into()], &["read".into()])
+            .unwrap();
 
         let claims = jwt.validate(&token_str);
         assert!(claims.is_ok());
@@ -350,12 +362,18 @@ mod tests {
     #[test]
     fn test_jwt_with_roles_and_permissions() {
         let jwt = JWT::with_config(jwt_test_config());
-        let token = jwt.create_access_token(
-            "user-1",
-            Some("charlie"),
-            &["admin".into(), "editor".into()],
-            &["user:read".into(), "user:write".into(), "admin:access".into()],
-        ).unwrap();
+        let token = jwt
+            .create_access_token(
+                "user-1",
+                Some("charlie"),
+                &["admin".into(), "editor".into()],
+                &[
+                    "user:read".into(),
+                    "user:write".into(),
+                    "admin:access".into(),
+                ],
+            )
+            .unwrap();
 
         let claims = jwt.validate(&token).unwrap();
         assert!(claims.has_role("admin"));
@@ -404,35 +422,37 @@ mod tests {
     #[test]
     fn test_app_group() {
         let cfg = AppConfig::default();
-        App::with_config(cfg)
-            .unwrap()
-            .group("/api/v1", |app| {
-                app.get("/users", || async { Res::ok("list") })
-            });
+        App::with_config(cfg).unwrap().group("/api/v1", |app| {
+            app.get("/users", || async { Res::ok("list") })
+        });
     }
 
     #[test]
     fn test_app_with_role() {
         let cfg = AppConfig::default();
-        App::with_config(cfg)
-            .unwrap()
-            .with_role("GET", "/admin/dashboard", || async { Res::ok("admin") }, "admin");
+        App::with_config(cfg).unwrap().with_role(
+            "GET",
+            "/admin/dashboard",
+            || async { Res::ok("admin") },
+            "admin",
+        );
     }
 
     #[test]
     fn test_app_with_permission() {
         let cfg = AppConfig::default();
-        App::with_config(cfg)
-            .unwrap()
-            .with_permission("POST", "/admin/users", || async { Res::ok("created") }, "admin:write");
+        App::with_config(cfg).unwrap().with_permission(
+            "POST",
+            "/admin/users",
+            || async { Res::ok("created") },
+            "admin:write",
+        );
     }
 
     #[test]
     fn test_app_on_startup() {
         let cfg = AppConfig::default();
-        let _app = App::with_config(cfg)
-            .unwrap()
-            .on_startup(|| async {});
+        let _app = App::with_config(cfg).unwrap().on_startup(|| async {});
     }
 
     #[test]
@@ -454,7 +474,12 @@ mod tests {
 
         let app: Router = router.into_axum();
         let resp = app
-            .oneshot(Request::builder().uri("/api/status").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -473,8 +498,14 @@ mod tests {
 
         let app: Router = router.into_axum();
 
-        let get_resp = app.clone()
-            .oneshot(Request::builder().uri("/items").body(Body::empty()).unwrap())
+        let get_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/items")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(get_resp.status(), StatusCode::OK);
@@ -486,7 +517,7 @@ mod tests {
                     .uri("/items")
                     .header("content-type", "application/json")
                     .body(Body::from("{}"))
-                    .unwrap()
+                    .unwrap(),
             )
             .await
             .unwrap();

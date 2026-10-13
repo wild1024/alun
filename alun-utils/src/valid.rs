@@ -55,28 +55,44 @@ impl Valid {
     // ---- 基础验证 ----
 
     /// 验证邮箱
-    pub fn is_email(s: &str) -> bool { Self::email_re().is_match(s) }
+    pub fn is_email(s: &str) -> bool {
+        Self::email_re().is_match(s)
+    }
 
     /// 验证手机号（中国大陆）或固话（如 010-12345678）
-    pub fn is_mobile(s: &str) -> bool { Self::mobile_re().is_match(s) }
+    pub fn is_mobile(s: &str) -> bool {
+        Self::mobile_re().is_match(s)
+    }
 
     /// 验证电话号码（E.164 格式）
-    pub fn is_phone(s: &str) -> bool { Self::phone_re().is_match(s) }
+    pub fn is_phone(s: &str) -> bool {
+        Self::phone_re().is_match(s)
+    }
 
     /// 验证 URL
-    pub fn is_url(s: &str) -> bool { Self::url_re().is_match(s) }
+    pub fn is_url(s: &str) -> bool {
+        Self::url_re().is_match(s)
+    }
 
     /// 验证用户名（3~50 位字母、数字、下划线、点、横线）
-    pub fn is_username(s: &str) -> bool { Self::username_re().is_match(s) }
+    pub fn is_username(s: &str) -> bool {
+        Self::username_re().is_match(s)
+    }
 
     /// 验证十六进制颜色（#RRGGBB）
-    pub fn is_color(s: &str) -> bool { Self::color_re().is_match(s) }
+    pub fn is_color(s: &str) -> bool {
+        Self::color_re().is_match(s)
+    }
 
     /// 验证是否为纯数字
-    pub fn is_digits(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) }
+    pub fn is_digits(s: &str) -> bool {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+    }
 
     /// 验证是否为字母+数字组合
-    pub fn is_alphanumeric(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric()) }
+    pub fn is_alphanumeric(s: &str) -> bool {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric())
+    }
 
     /// 验证字符串长度范围
     pub fn len_between(s: &str, min: usize, max: usize) -> bool {
@@ -88,7 +104,9 @@ impl Valid {
 
     /// 验证密码强度（至少 8 位，包含大小写+数字+特殊字符）
     pub fn is_strong_password(s: &str) -> bool {
-        if s.len() < 8 { return false; }
+        if s.len() < 8 {
+            return false;
+        }
         let has_lower = s.chars().any(|c| c.is_ascii_lowercase());
         let has_upper = s.chars().any(|c| c.is_ascii_uppercase());
         let has_digit = s.chars().any(|c| c.is_ascii_digit());
@@ -105,7 +123,8 @@ impl Valid {
 
     /// 验证 Base64
     pub fn is_base64(s: &str) -> bool {
-        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s).is_ok() && s.len() % 4 == 0
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s).is_ok()
+            && s.len().is_multiple_of(4)
     }
 
     // ---- UUID ----

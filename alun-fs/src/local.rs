@@ -1,12 +1,12 @@
+use chrono::Utc;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{info, error};
+use tracing::{error, info};
 use uuid::Uuid;
-use chrono::Utc;
 
-use super::plugin::{FileMeta, StoreResult};
 use super::backend::StorageBackend;
+use super::plugin::{FileMeta, StoreResult};
 
 /// 本地文件系统存储后端
 ///
@@ -34,7 +34,9 @@ impl LocalFs {
     }
 
     /// 获取存储根目录路径
-    pub fn root_dir(&self) -> &Path { &self.root_dir }
+    pub fn root_dir(&self) -> &Path {
+        &self.root_dir
+    }
 
     /// 写入文件（按指定路径，保留原始名称）
     pub async fn write_at(&self, relative_path: &str, data: &[u8]) -> StoreResult<FileMeta> {
@@ -51,9 +53,9 @@ impl LocalFs {
             format!("文件写入失败: {}", e)
         })?;
 
-        let metadata = fs::metadata(&full_path).await.map_err(|e| {
-            format!("获取元数据失败: {}", e)
-        })?;
+        let metadata = fs::metadata(&full_path)
+            .await
+            .map_err(|e| format!("获取元数据失败: {}", e))?;
 
         let meta = FileMeta {
             file_id: Uuid::new_v4().to_string(),
@@ -85,13 +87,13 @@ impl LocalFs {
         let full_path = self.resolve(&relative_path);
         self.ensure_parent(&full_path).await?;
 
-        let mut file = fs::File::create(&full_path).await.map_err(|e| {
-            format!("文件创建失败: {}", e)
-        })?;
+        let mut file = fs::File::create(&full_path)
+            .await
+            .map_err(|e| format!("文件创建失败: {}", e))?;
 
-        file.write_all(data).await.map_err(|e| {
-            format!("文件写入失败: {}", e)
-        })?;
+        file.write_all(data)
+            .await
+            .map_err(|e| format!("文件写入失败: {}", e))?;
 
         let meta = FileMeta {
             file_id,
@@ -102,7 +104,10 @@ impl LocalFs {
             created_at: Utc::now(),
         };
 
-        info!("文件存储成功: {} -> {} ({} bytes)", original_name, meta.stored_path, meta.size);
+        info!(
+            "文件存储成功: {} -> {} ({} bytes)",
+            original_name, meta.stored_path, meta.size
+        );
         Ok(meta)
     }
 
@@ -116,14 +121,14 @@ impl LocalFs {
             return Err(format!("文件不存在: {}", relative_path));
         }
 
-        let mut file = fs::File::open(&full_path).await.map_err(|e| {
-            format!("文件打开失败: {}", e)
-        })?;
+        let mut file = fs::File::open(&full_path)
+            .await
+            .map_err(|e| format!("文件打开失败: {}", e))?;
 
         let mut data = Vec::new();
-        file.read_to_end(&mut data).await.map_err(|e| {
-            format!("文件读取失败: {}", e)
-        })?;
+        file.read_to_end(&mut data)
+            .await
+            .map_err(|e| format!("文件读取失败: {}", e))?;
 
         Ok(data)
     }
@@ -136,9 +141,9 @@ impl LocalFs {
             return Ok(());
         }
 
-        fs::remove_file(&full_path).await.map_err(|e| {
-            format!("文件删除失败: {}", e)
-        })?;
+        fs::remove_file(&full_path)
+            .await
+            .map_err(|e| format!("文件删除失败: {}", e))?;
 
         info!("文件已删除: {}", relative_path);
         Ok(())
@@ -170,12 +175,12 @@ impl LocalFs {
     }
 
     async fn ensure_parent(&self, full_path: &Path) -> StoreResult<()> {
-        if let Some(parent) = full_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).await.map_err(|e| {
-                    format!("目录创建失败: {}", e)
-                })?;
-            }
+        if let Some(parent) = full_path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("目录创建失败: {}", e))?;
         }
         Ok(())
     }
@@ -183,7 +188,9 @@ impl LocalFs {
 
 #[async_trait::async_trait]
 impl StorageBackend for LocalFs {
-    fn backend_type(&self) -> &str { "local" }
+    fn backend_type(&self) -> &str {
+        "local"
+    }
 
     async fn write(&self, original_name: &str, data: &[u8]) -> Result<FileMeta, String> {
         self.write_with_name(original_name, data).await
@@ -236,7 +243,8 @@ fn mime_guess(filename: &str) -> String {
         "xls" => "application/vnd.ms-excel",
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         _ => "application/octet-stream",
-    }.into()
+    }
+    .into()
 }
 
 #[cfg(test)]
@@ -260,7 +268,10 @@ mod tests {
         let dir = test_dir("write_read");
         let local_fs = LocalFs::new(dir.to_str().unwrap());
 
-        let meta = local_fs.write_with_name("test.txt", b"hello world").await.unwrap();
+        let meta = local_fs
+            .write_with_name("test.txt", b"hello world")
+            .await
+            .unwrap();
         assert_eq!(meta.original_name, "test.txt");
         assert_eq!(meta.size, 11);
         assert_eq!(meta.content_type, "text/plain");
@@ -278,7 +289,10 @@ mod tests {
         let dir = test_dir("write_del");
         let local_fs = LocalFs::new(dir.to_str().unwrap());
 
-        let meta = local_fs.write_with_name("delete_me.txt", b"tmp").await.unwrap();
+        let meta = local_fs
+            .write_with_name("delete_me.txt", b"tmp")
+            .await
+            .unwrap();
         assert!(local_fs.exists(&meta.stored_path).await);
 
         local_fs.delete(&meta.stored_path).await.unwrap();
@@ -308,14 +322,21 @@ mod tests {
 
         assert_eq!(local_fs.backend_type(), "local");
 
-        let meta = local_fs.write("trait_test.txt", b"trait test").await.unwrap();
+        let meta = local_fs
+            .write("trait_test.txt", b"trait test")
+            .await
+            .unwrap();
         assert_eq!(meta.original_name, "trait_test.txt");
 
-        let data = StorageBackend::read(&local_fs, &meta.stored_path).await.unwrap();
+        let data = StorageBackend::read(&local_fs, &meta.stored_path)
+            .await
+            .unwrap();
         assert_eq!(data, b"trait test");
 
         assert!(StorageBackend::exists(&local_fs, &meta.stored_path).await);
-        StorageBackend::delete(&local_fs, &meta.stored_path).await.unwrap();
+        StorageBackend::delete(&local_fs, &meta.stored_path)
+            .await
+            .unwrap();
         assert!(!StorageBackend::exists(&local_fs, &meta.stored_path).await);
 
         cleanup(&dir);
@@ -326,7 +347,10 @@ mod tests {
         let dir = test_dir("noext");
         let local_fs = LocalFs::new(dir.to_str().unwrap());
 
-        let meta = local_fs.write_with_name("noext", b"no extension").await.unwrap();
+        let meta = local_fs
+            .write_with_name("noext", b"no extension")
+            .await
+            .unwrap();
         assert!(meta.stored_path.ends_with(".bin"));
 
         cleanup(&dir);
@@ -337,7 +361,10 @@ mod tests {
         use super::mime_guess;
         assert_eq!(mime_guess("photo.jpg"), "image/jpeg");
         assert_eq!(mime_guess("data.json"), "application/json");
-        assert_eq!(mime_guess("sheet.xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        assert_eq!(
+            mime_guess("sheet.xlsx"),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
         assert_eq!(mime_guess("unknown.xyz"), "application/octet-stream");
     }
 }

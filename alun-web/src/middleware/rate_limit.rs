@@ -1,11 +1,8 @@
 //! IP 限流中间件（滑动窗口）
 
-use axum::{
-    extract::Request,
-    response::Response,
-    body::Body,
-};
+use crate::response::{Res, codes};
 use axum::http::StatusCode;
+use axum::{body::Body, extract::Request, response::Response};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::future::Future;
@@ -14,7 +11,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 use tower::{Layer, Service};
-use crate::response::{Res, codes};
 
 /// 令牌桶限流中间件（基于 IP）
 ///
@@ -98,7 +94,10 @@ where
         let allowed = {
             let mut guard = store.write();
             let now = Instant::now();
-            let window = guard.entry(ip).or_insert(IpWindow { count: 0, window_start: now });
+            let window = guard.entry(ip).or_insert(IpWindow {
+                count: 0,
+                window_start: now,
+            });
 
             if now - window.window_start > window_dur {
                 window.count = 0;
@@ -118,8 +117,10 @@ where
             Box::pin(async move { inner.call(req).await })
         } else {
             let body = serde_json::to_string(&Res::<()>::fail(
-                codes::TOO_MANY_REQUESTS, "请求过于频繁，请稍后再试"
-            )).unwrap_or_else(|_| r#"{"code":429,"msg":"请求过于频繁，请稍后再试"}"#.to_string());
+                codes::TOO_MANY_REQUESTS,
+                "请求过于频繁，请稍后再试",
+            ))
+            .unwrap_or_else(|_| r#"{"code":429,"msg":"请求过于频繁，请稍后再试"}"#.to_string());
             let resp = Response::builder()
                 .status(StatusCode::TOO_MANY_REQUESTS)
                 .header("Content-Type", "application/json; charset=utf-8")
@@ -206,10 +207,7 @@ mod tests {
         let forged_rotations = ["8.8.8.8", "9.9.9.9", "6.6.6.6"];
         let base = "198.51.100.7";
         for forged in forged_rotations {
-            let req = request_with_headers(&[(
-                "x-forwarded-for",
-                &format!("{forged}, {base}"),
-            )]);
+            let req = request_with_headers(&[("x-forwarded-for", &format!("{forged}, {base}"))]);
             assert_eq!(extract_trusted_client_ip(&req), base);
         }
     }
