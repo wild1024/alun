@@ -2,6 +2,8 @@
 name = "alun-db-driver-mysql"
 version.workspace = true
 edition = "2024"
+description = "alun-db MySQL 驱动"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 alun-db-core = { version = "0.3.0", path = "../alun-db-core" }
