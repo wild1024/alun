@@ -67,7 +67,10 @@ ipnetwork    = ["dep:ipnetwork",    "alun-db-core/ipnetwork"]
 [dev-dependencies]
 # 自引用 dev 依赖：仅为本 crate 的测试 / 示例构建统一开启生态类型特性，
 # 使 `cargo test` 无需显式 `--features` 即可编译（生产功能不受影响）。
-alun-db = { version = "0.3.0", path = ".", features = ["chrono", "time", "jiff", "rust_decimal", "bigdecimal", "uuid", "ulid", "json", "ipnetwork"] }
+# 不写 `version`：自引用无法从 registry 解析到自身尚未发布的版本，带 version 会导致
+# 首次发布报 `failed to select a version for the requirement \`alun-db = "^0.3.0"\``；
+# 仅写 path 时 cargo 打包会自动丢弃该条 dev-dependency，对下游无影响。
+alun-db = { path = ".", features = ["chrono", "time", "jiff", "rust_decimal", "bigdecimal", "uuid", "ulid", "json", "ipnetwork"] }
 alun-db-core = { version = "0.3.0", path = "../alun-db-core" }
 alun-db-sql  = { version = "0.3.0", path = "../alun-db-sql" }
 tokio        = { version = "1.53", features = ["macros", "rt-multi-thread", "sync", "rt"] }
