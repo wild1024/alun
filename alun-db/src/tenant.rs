@@ -462,7 +462,7 @@ pub(crate) fn ensure_raw_allowed<T: Model>(tenant_bound: bool, annotated: bool) 
             #[cfg(feature = "metrics")]
             crate::metrics::observe_raw_sql_unbound(T::TABLE);
             Err(DbError::InvalidValue(format!(
-            "model `{table}` is tenant-isolated, but its raw SQL is not verifiably bound to the \
+                "model `{table}` is tenant-isolated, but its raw SQL is not verifiably bound to the \
              current tenant (tenant_bound={tenant_bound}, annotated={annotated}). Fix it by:\n  \
              1. preferring a structured join: `{table}::query().join::<JoinModel>(JoinKind::Inner, on)` \
              — the framework injects the tenant predicate for every `#[tenant]` join target, so a \
@@ -471,10 +471,10 @@ pub(crate) fn ensure_raw_allowed<T: Model>(tenant_bound: bool, annotated: bool) 
              (joined with `AND`) AND assert completeness via `.raw_tenant_annotated()`;\n  \
              or run inside `tenant_scope(TenantContext::Cross, ..)` to declare a deliberate \
              cross-tenant access",
-            table = T::TABLE,
-            marker = TENANT_MARKER,
-            tenant_bound = tenant_bound,
-            annotated = annotated,
+                table = T::TABLE,
+                marker = TENANT_MARKER,
+                tenant_bound = tenant_bound,
+                annotated = annotated,
             )))
         }
         None => {
@@ -583,7 +583,8 @@ pub(crate) fn rewrite_raw_tenant<T: Model>(
                      context is set; run it inside `tenant_scope(..)`, or use \
                      `tenant_scope(TenantContext::Cross, ..)` to declare a deliberate \
                      cross-tenant access",
-                    T::TABLE, TENANT_MARKER
+                    T::TABLE,
+                    TENANT_MARKER
                 )));
             }
         }
@@ -767,9 +768,7 @@ fn parse_marker_tail(rest: &str) -> Result<(Option<&str>, usize)> {
     }
 
     let mut end = 1usize;
-    while end < bytes.len()
-        && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_')
-    {
+    while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
         end += 1;
     }
     if end == 1 {

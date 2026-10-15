@@ -6,7 +6,7 @@ description = "alun-db SQL 渲染器与方言实现"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-alun-db-core = { version = "0.3.0", path = "../alun-db-core" }
+alun-db-core = { version = "0.4.0", path = "../alun-db-core" }
 
 [features]
 default = ["sqlite", "postgres", "mysql"]

@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::{body::Body, extract::Request, response::Response};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
@@ -37,7 +38,13 @@ fn match_path(request_path: &str, rule_path: &str) -> bool {
 #[derive(Clone)]
 pub struct PermissionCheckLayer {
     /// 权限规则列表
-    pub rules: Vec<PermissionRule>,
+    ///
+    /// 以 `Arc` 共享：`Layer::layer()` 会为**每条路由**生成一个服务实例
+    /// （且在生成前 axum 还会按路由克隆一次 layer），若每次直接克隆 `Vec`，
+    /// 装配成本为 `O(路由数 × 规则数)` 的深克隆（每条规则含多个 `String`）。
+    /// 实测在 ~200 路由 × ~200 规则时占启动期中间件装配的 90% 以上
+    /// （155–213ms / 171–232ms，debug）；共享后每次生成服务只做引用计数递增。
+    pub rules: Arc<Vec<PermissionRule>>,
 }
 
 /// 权限匹配规则
@@ -55,27 +62,35 @@ impl PermissionCheckLayer {
     /// 从配置文件规则创建
     pub fn from_config(config_rules: &[alun_config::PermissionRule]) -> Self {
         Self {
-            rules: config_rules
-                .iter()
-                .map(|r| PermissionRule {
-                    path: r.path.clone(),
-                    methods: r.methods.clone(),
-                    permission: r.permission.clone(),
-                })
-                .collect(),
+            rules: Arc::new(
+                config_rules
+                    .iter()
+                    .map(|r| PermissionRule {
+                        path: r.path.clone(),
+                        methods: r.methods.clone(),
+                        permission: r.permission.clone(),
+                    })
+                    .collect(),
+            ),
         }
     }
 
     /// 合并 `#[permission]` 宏注解的编译期规则
     pub fn with_macro_rules(mut self, rules: &[crate::PermissionDef]) -> Self {
+        let list = Arc::make_mut(&mut self.rules);
         for def in rules {
-            self.rules.push(PermissionRule {
+            list.push(PermissionRule {
                 path: def.path.to_string(),
                 methods: vec![def.method.to_string()],
                 permission: def.permission.to_string(),
             });
         }
         self
+    }
+
+    /// 追加一条规则（装配阶段使用；`Arc` 共享下按写时复制处理）
+    pub fn push_rule(&mut self, rule: PermissionRule) {
+        Arc::make_mut(&mut self.rules).push(rule);
     }
 
     /// 是否有权限规则（无规则时中间件不生效）
@@ -90,7 +105,7 @@ impl<S> Layer<S> for PermissionCheckLayer {
     fn layer(&self, inner: S) -> Self::Service {
         PermissionCheckService {
             inner,
-            rules: self.rules.clone(),
+            rules: Arc::clone(&self.rules),
         }
     }
 }
@@ -100,8 +115,8 @@ impl<S> Layer<S> for PermissionCheckLayer {
 pub struct PermissionCheckService<S> {
     /// 下游服务
     inner: S,
-    /// 权限规则列表
-    rules: Vec<PermissionRule>,
+    /// 权限规则列表（与层共享，装配时零深克隆）
+    rules: Arc<Vec<PermissionRule>>,
 }
 
 impl<S> Service<Request<Body>> for PermissionCheckService<S>

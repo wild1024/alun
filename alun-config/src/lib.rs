@@ -629,6 +629,26 @@ pub struct MigrationConfig {
     #[serde(default)]
     pub seed_path: String,
 
+    /// 迁移事务的 `synchronous_commit` 会话设置（PostgreSQL）。
+    ///
+    /// 置为 `"off"` 时每个迁移事务以 `SET LOCAL synchronous_commit = off` 执行：
+    /// COMMIT 不等待 WAL 落盘。首次全量迁移由数十个独立事务组成，提交等待
+    /// （磁盘 fsync）通常是最大单项——本机实测 40 个迁移可省 1 秒以上。
+    /// 代价：极端断电场景可能丢失最近已提交的迁移（重启重跑即可）。
+    /// 空串（默认）不设置，保持 PG 默认（`on`）。
+    #[serde(default)]
+    pub synchronous_commit: String,
+
+    /// 是否把单次启动中的**全部待应用迁移合并进一个事务**（默认 `false`）。
+    ///
+    /// 开启后仅当待应用集合全部为事务型迁移且超过 1 条时生效（遇到
+    /// `-- +no-transaction` 的迁移自动回退逐条模式）：省去每迁移一次
+    /// BEGIN / COMMIT 的网络往返。代价是**失败整批回滚**——已应用的迁移
+    /// 不再保留、重跑从零开始（断点续跑语义仅在关闭时保证），仅建议
+    /// 「空库首次初始化」这类可整体重试的场景开启。
+    #[serde(default)]
+    pub single_transaction: bool,
+
     /// 是否按方言拆分单文件内的多语句（`01_base_tables_init.sql` 这类单文件迁移必需）
     #[serde(default = "default_true")]
     pub statement_split: bool,
@@ -1209,6 +1229,8 @@ impl Default for MigrationConfig {
             import_legacy: false,
             baseline_on_migrate: false,
             baseline_version: String::new(),
+            synchronous_commit: String::new(),
+            single_transaction: false,
             placeholders: std::collections::HashMap::new(),
         }
     }
@@ -1476,6 +1498,70 @@ fn merge_database(base: &mut DatabaseConfig, overlay: &DatabaseConfig) {
     }
     if overlay.migration.auto_migrate {
         base.migration.auto_migrate = true;
+    }
+    // 迁移选项逐字段补全（2026-10-14 修复）：此前仅合并 enabled / path / auto_migrate，
+    // 其余字段（sources / seed_path / synchronous_commit / single_transaction / 前缀族 /
+    // 校验与基线开关等）会被**静默丢弃**——profile 中写了也不生效（例如
+    // 「关闭同步提交」实际从未生效）。语义：与默认值不同即视为「显式配置」并覆盖 base；
+    // 反向布尔（默认 true 的项置 false、默认 false 的项置 true）遵循既有约定。
+    let default_mig = MigrationConfig::default();
+    let overlay_mig = &overlay.migration;
+    if !overlay_mig.sources.is_empty() {
+        base.migration.sources = overlay_mig.sources.clone();
+    }
+    if !overlay_mig.seed_path.is_empty() {
+        base.migration.seed_path = overlay_mig.seed_path.clone();
+    }
+    if overlay_mig.synchronous_commit != default_mig.synchronous_commit {
+        base.migration.synchronous_commit = overlay_mig.synchronous_commit.clone();
+    }
+    if overlay_mig.single_transaction {
+        base.migration.single_transaction = true;
+    }
+    if overlay_mig.statement_split != default_mig.statement_split {
+        base.migration.statement_split = overlay_mig.statement_split;
+    }
+    if overlay_mig.up_down_sections != default_mig.up_down_sections {
+        base.migration.up_down_sections = overlay_mig.up_down_sections;
+    }
+    if overlay_mig.version_prefix != default_mig.version_prefix {
+        base.migration.version_prefix = overlay_mig.version_prefix.clone();
+    }
+    if overlay_mig.name_separator != default_mig.name_separator {
+        base.migration.name_separator = overlay_mig.name_separator.clone();
+    }
+    if overlay_mig.repeatable_prefix != default_mig.repeatable_prefix {
+        base.migration.repeatable_prefix = overlay_mig.repeatable_prefix.clone();
+    }
+    if overlay_mig.seed_prefix != default_mig.seed_prefix {
+        base.migration.seed_prefix = overlay_mig.seed_prefix.clone();
+    }
+    if overlay_mig.baseline_prefix != default_mig.baseline_prefix {
+        base.migration.baseline_prefix = overlay_mig.baseline_prefix.clone();
+    }
+    if overlay_mig.validate_checksum != default_mig.validate_checksum {
+        base.migration.validate_checksum = overlay_mig.validate_checksum;
+    }
+    if overlay_mig.divergent_policy != default_mig.divergent_policy {
+        base.migration.divergent_policy = overlay_mig.divergent_policy.clone();
+    }
+    if overlay_mig.out_of_order {
+        base.migration.out_of_order = true;
+    }
+    if overlay_mig.transaction_default != default_mig.transaction_default {
+        base.migration.transaction_default = overlay_mig.transaction_default;
+    }
+    if overlay_mig.import_legacy {
+        base.migration.import_legacy = true;
+    }
+    if overlay_mig.baseline_on_migrate {
+        base.migration.baseline_on_migrate = true;
+    }
+    if !overlay_mig.baseline_version.is_empty() {
+        base.migration.baseline_version = overlay_mig.baseline_version.clone();
+    }
+    if !overlay_mig.placeholders.is_empty() {
+        base.migration.placeholders = overlay_mig.placeholders.clone();
     }
 }
 

@@ -23,7 +23,10 @@ fn config_with_metrics(mc: MetricsConfig) -> AppConfig {
 
 /// 带回环 `ConnectInfo` 的请求（端点按来源 IP 判定，见 `[metrics].allow_ips`）。
 fn req(uri: &str) -> Request<Body> {
-    let mut r = Request::builder().uri(uri).body(Body::empty()).expect("request");
+    let mut r = Request::builder()
+        .uri(uri)
+        .body(Body::empty())
+        .expect("request");
     let addr: std::net::SocketAddr = "127.0.0.1:54321".parse().expect("addr");
     r.extensions_mut().insert(ConnectInfo(addr));
     r
@@ -53,7 +56,10 @@ async fn endpoint_is_mounted_and_scrapeable_when_enabled() {
     assert_eq!(resp.status(), 200);
 
     // 抓取端点（无 Token）——端点不穿鉴权链，抓取器无需凭据
-    let resp = app.oneshot(req("/metrics")).await.expect("oneshot /metrics");
+    let resp = app
+        .oneshot(req("/metrics"))
+        .await
+        .expect("oneshot /metrics");
     assert_eq!(resp.status(), 200, "已启用 + 回环来源 → 应可抓取");
 
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX)

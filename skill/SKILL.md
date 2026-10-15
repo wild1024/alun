@@ -1,12 +1,12 @@
 ---
 name: alun-project
-description: 项目级速查——Alun 框架（v0.3.0，21 crate Cargo workspace）的 AI 操作要点：feature 分层、handler 单一出口、路由 scan()、命令、高频踩坑与文件指针。加载即用，详细参考见 ../skill-alun/SKILL.md。
+description: 项目级速查——Alun 框架（v0.4.0，21 crate Cargo workspace）的 AI 操作要点：feature 分层、handler 单一出口、路由 scan()、命令、高频踩坑与文件指针。加载即用，详细参考见 ../skill-alun/SKILL.md。
 agent_created: true
 ---
 
 # Alun Framework — 项目级 AI 速查
 
-首个面向 AI Coding 的 Rust Web 框架（配置驱动 + 插件架构）。版本 0.3.0（Edition 2024，rust-version 1.94.1），
+首个面向 AI Coding 的 Rust Web 框架（配置驱动 + 插件架构）。版本 0.4.0（Edition 2024，rust-version 1.94.1），
 Cargo workspace 含 21 个 crate + 5 个示例工程。分层：`用户代码 → alun（门面）→ 功能 crate → alun-core（纯骨架）`。
 
 ## 命令

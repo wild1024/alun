@@ -110,6 +110,26 @@ impl Transaction {
         self.execute_owned(sql.to_string(), params).await
     }
 
+    /// 本事务的驱动是否支持「整段脚本一次执行」（multi-statement 协议）。
+    ///
+    /// 支持时可用 [`Self::execute_script`] 把大量一次性语句压缩到一次往返。
+    pub async fn supports_script(&self) -> bool {
+        let mut guard = self.inner.raw.lock().await;
+        guard.as_mut().is_some_and(|raw| raw.supports_script())
+    }
+
+    /// 执行整段脚本（多语句，`;` 分隔，不支持参数绑定）。
+    ///
+    /// 仅在 [`Self::supports_script`] 为 `true` 时可用；否则返回
+    /// [`DbError::UnsupportedFeature`]，调用方应回退逐条执行。
+    pub async fn execute_script(&self, sql: &str) -> Result<()> {
+        let mut guard = self.inner.raw.lock().await;
+        let raw = guard
+            .as_mut()
+            .ok_or_else(|| DbError::Transaction("transaction already finished".into()))?;
+        raw.execute_script_raw(sql).await
+    }
+
     /// 带参数执行（SQL 已拥有所有权，避免再克隆一份）。
     pub(crate) async fn execute_owned(&self, sql: String, params: Vec<Value>) -> Result<u64> {
         // F10：事务写路径埋点。计时**包含**等待事务内核互斥锁的时间——

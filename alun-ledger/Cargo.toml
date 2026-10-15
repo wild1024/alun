@@ -15,11 +15,11 @@ path = "src/main.rs"
 
 [dependencies]
 # Web 层：只开 db，避免默认 full 拉入 kafka/task 等重依赖
-alun = { path = "../alun", default-features = false, features = ["db", "cache", "plugin"] }
-alun-core = { path = "../alun-core" }
-alun-web = { path = "../alun-web" }
-alun-config = { path = "../alun-config" }
-alun-cache = { path = "../alun-cache" }
+alun = { version = "0.4.0", path = "../alun", default-features = false, features = ["db", "cache", "plugin"] }
+alun-core = { version = "0.4.0", path = "../alun-core" }
+alun-web = { version = "0.4.0", path = "../alun-web" }
+alun-config = { version = "0.4.0", path = "../alun-config" }
+alun-cache = { version = "0.4.0", path = "../alun-cache" }
 # 数据层：显式开启生态类型 feature（默认仅 ["sqlite", "async"]）
 alun-db = { path = "../alun-db", features = [
     "sqlite",
@@ -30,8 +30,8 @@ alun-db = { path = "../alun-db", features = [
     "json",
     "uuid",
 ] }
-alun-db-core = { path = "../alun-db-core" }
-alun-db-sql = { path = "../alun-db-sql" }
+alun-db-core = { version = "0.4.0", path = "../alun-db-core" }
+alun-db-sql = { version = "0.4.0", path = "../alun-db-sql" }
 
 axum = { workspace = true }
 tokio = { workspace = true }
@@ -58,10 +58,10 @@ strict_probe = []
 derive_probe = []
 
 [build-dependencies]
-alun-db-build = { path = "../alun-db-build" }
+alun-db-build = { version = "0.4.0", path = "../alun-db-build" }
 
 [dev-dependencies]
-alun-plugin = { path = "../alun-plugin" }
+alun-plugin = { version = "0.4.0", path = "../alun-plugin" }
 # 自引用 dev 依赖：让集成测试默认带上 failpoint 开关（生产构建不受影响）
 alun-ledger = { path = ".", features = ["failpoint"] }
 tokio = { workspace = true }

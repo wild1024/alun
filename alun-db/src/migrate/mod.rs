@@ -271,6 +271,21 @@ pub struct MigratorOptions {
     pub baseline_on_migrate: bool,
     /// 基线版本：`<=` 该版本的迁移被视为已应用（仅 `baseline_on_migrate` 时生效）。
     pub baseline_version: Option<Version>,
+    /// 迁移事务的 `synchronous_commit` 设置（PostgreSQL，`SET LOCAL`）。
+    ///
+    /// `None`（默认）不设置；`Some("off")` 时每个迁移事务在脚本执行前执行
+    /// `SET LOCAL synchronous_commit = off`——提交不等待 WAL 落盘，首次全量迁移
+    /// （数十个独立事务）的提交等待显著降低（本机实测最大单项）。取值仅允许
+    /// ASCII 字母、数字与 `_`（防注入），非法值在执行时报错；仅事务模式生效。
+    pub synchronous_commit: Option<String>,
+    /// 是否把单次 run 中的**全部待应用迁移合并进一个事务**（默认 `false`）。
+    ///
+    /// 开启后仅当待应用集合全部为事务型迁移且超过 1 条时生效（含
+    /// `-- +no-transaction` 的批次自动回退逐条模式）：省去每迁移一次
+    /// BEGIN / COMMIT 往返。代价是失败时**整批回滚**——已应用的迁移不再保留，
+    /// 重跑从零开始（断点续跑语义仅在关闭时保证）。适合「空库首次初始化」
+    /// 这类可整体重试的场景，不适合增量补迁。
+    pub single_transaction: bool,
     /// 脚本占位符表：替换迁移 SQL 中的 `${key}`。
     ///
     /// 空表（默认）表示**完全不扫描**，含 `${` 的字符串字面量因此不会被动到。
@@ -301,6 +316,8 @@ impl Default for MigratorOptions {
             import_legacy: false,
             baseline_on_migrate: false,
             baseline_version: None,
+            synchronous_commit: None,
+            single_transaction: false,
             placeholders: HashMap::new(),
             is_destructive_allowed: false,
         }
@@ -351,6 +368,15 @@ impl Migrator {
     /// （不要求 `S__` 前缀）。种子迁移在版本化迁移之后执行，内容指纹变化时重跑。
     pub fn source_seed(mut self, dir: impl Into<PathBuf>) -> Self {
         self.seed_sources.push(dir.into());
+        self
+    }
+
+    /// 设置编译期嵌入的迁移来源（`migrate!` 宏产物）。
+    ///
+    /// 与目录来源**并存**（加载期合并两者，版本号冲突会显式报错）；嵌入文件与
+    /// 磁盘文件共用同一套解析、分类与指纹逻辑，行为完全一致。
+    pub fn source_embedded(mut self, pairs: &'static [(&'static str, &'static str)]) -> Self {
+        self.embedded = pairs;
         self
     }
 
@@ -445,7 +471,7 @@ impl Migrator {
 
         let mut statuses: Vec<MigrationStatus> = Vec::with_capacity(list.len());
         for m in &list {
-            let current = history::checksum::content_checksum(&m.up);
+            let current = m.checksum().to_string();
             let record = applied.get(&(m.kind, m.name.clone()));
             let (is_applied, applied_checksum, state) = match record {
                 // 上次失败（success=false）→ 本次会重跑
@@ -753,6 +779,7 @@ impl Migrator {
                 down: m.down.clone(),
                 source: None,
                 is_no_transaction: false,
+                checksum_cache: std::sync::OnceLock::new(),
             });
         }
         check_identity_conflicts(&list)?;
@@ -779,14 +806,17 @@ impl Migrator {
 
         let max_applied = max_applied_version(&applied);
         let mut seq = history::next_seq(&applied);
-        let mut applied_count = 0_usize;
 
+        // 先选出本次要应用的清单（跳过已成功记录与基线标记），再决定执行模式：
+        // 单事务模式（`single_transaction`，仅当全部为事务型迁移且 >1 条时生效）
+        // 省去每迁移一次 BEGIN / COMMIT 往返；否则逐条应用（失败隔离、断点续跑）。
+        let mut pending: Vec<(&LoadedMigration, i64, String)> = Vec::new();
         for migration in list {
             if migration.kind == MigrationKind::Baseline {
                 // 基线只写标记，不执行 SQL（其内容已在加载期校验为空）
                 continue;
             }
-            let checksum = history::checksum::content_checksum(&migration.up);
+            let checksum = migration.checksum().to_string();
             let key = (migration.kind, migration.name.clone());
             match applied.get(&key) {
                 Some(record) if record.is_success => {
@@ -824,17 +854,53 @@ impl Migrator {
                 );
             }
 
-            let outcome = exec::apply_up(db, migration, &self.options, seq, &checksum).await?;
-            tracing::debug!(
-                migration = %migration.name,
-                statements = outcome.statement_count,
-                elapsed_ms = outcome.execution_ms,
-                "迁移已应用"
-            );
+            pending.push((migration, seq, checksum));
             seq += 1;
-            applied_count += 1;
         }
-        Ok(applied_count)
+        if pending.is_empty() {
+            return Ok(0);
+        }
+
+        let is_batch = self.options.single_transaction
+            && pending.len() > 1
+            && pending
+                .iter()
+                .all(|(m, _, _)| exec::is_transactional(m, &self.options, &m.up));
+        if is_batch {
+            // 单事务整批：全部迁移共用一个事务；失败整批回滚（重跑从零开始）。
+            tracing::info!(
+                count = pending.len(),
+                "单事务模式：本次 {} 个迁移合并为一个事务执行",
+                pending.len()
+            );
+            let tx = db.begin().await?;
+            for (migration, migration_seq, checksum) in &pending {
+                if let Err(e) =
+                    exec::apply_up_in_tx(&tx, migration, &self.options, *migration_seq, checksum)
+                        .await
+                {
+                    // 显式回滚后再上抛，避免带未提交事务的连接归还连接池
+                    if let Err(rollback_err) = tx.rollback().await {
+                        tracing::warn!("单事务模式回滚失败: {rollback_err}");
+                    }
+                    return Err(e);
+                }
+                tracing::debug!(migration = %migration.name, "迁移已应用（单事务模式）");
+            }
+            tx.commit().await?;
+        } else {
+            for (migration, migration_seq, checksum) in &pending {
+                let outcome =
+                    exec::apply_up(db, migration, &self.options, *migration_seq, checksum).await?;
+                tracing::debug!(
+                    migration = %migration.name,
+                    statements = outcome.statement_count,
+                    elapsed_ms = outcome.execution_ms,
+                    "迁移已应用"
+                );
+            }
+        }
+        Ok(pending.len())
     }
 
     /// 执行配置化的基线（`baseline_on_migrate` + `baseline_version`）。
@@ -931,7 +997,7 @@ impl Migrator {
             };
             // 已应用版本化迁移的指纹不符 → 接受当前内容
             if *kind == MigrationKind::Versioned && record.is_success {
-                let current = history::checksum::content_checksum(&migration.up);
+                let current = migration.checksum().to_string();
                 if record.checksum.as_deref() != Some(current.as_str()) {
                     match record.checksum.as_deref() {
                         // 历史行缺指纹 → 补录，不算「改指纹」
@@ -962,7 +1028,7 @@ impl Migrator {
             if migration.kind == MigrationKind::Baseline {
                 continue;
             }
-            let checksum = history::checksum::content_checksum(&migration.up);
+            let checksum = migration.checksum().to_string();
             let key = (migration.kind, migration.name.clone());
             let is_pending = match applied.get(&key) {
                 Some(record) if record.is_success => {
@@ -1057,11 +1123,7 @@ impl Migrator {
             .find(|m| m.kind == record.kind && m.name == record.name)
             .ok_or_else(|| out_of_scope_error(record, list.len()))?;
 
-        self.verify_one(
-            migration,
-            record,
-            &history::checksum::content_checksum(&migration.up),
-        )?;
+        self.verify_one(migration, record, migration.checksum())?;
         let outcome = exec::apply_down(db, migration, &self.options).await?;
         tracing::debug!(
             migration = %migration.name,
@@ -1094,7 +1156,7 @@ impl Migrator {
             if record.applied_via == AppliedVia::Baseline {
                 continue;
             }
-            let current = history::checksum::content_checksum(&migration.up);
+            let current = migration.checksum().to_string();
             if record.checksum.is_none() {
                 tracing::info!(
                     migration = %migration.name,
@@ -1274,6 +1336,7 @@ mod tests {
             down: String::new(),
             source: None,
             is_no_transaction: false,
+            checksum_cache: std::sync::OnceLock::new(),
         }
     }
 

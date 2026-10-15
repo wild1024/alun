@@ -512,8 +512,10 @@ async fn raw_sql_tenant_marker_preserves_bind_order() {
 
     with_tenant(1, async {
         let rows = Invoice::sql(sql!(
-            "SELECT * FROM invoices WHERE title <> ", { excluded },
-            " AND /*tenant*/ AND id >= ", { min_id },
+            "SELECT * FROM invoices WHERE title <> ",
+            { excluded },
+            " AND /*tenant*/ AND id >= ",
+            { min_id },
             " ORDER BY id"
         ))
         .raw_tenant_annotated()
@@ -554,11 +556,9 @@ async fn tenant_marker_inside_string_literal_is_not_a_marker() {
     seed(&db).await;
 
     with_tenant(1, async {
-        let result = Invoice::sql(sql!(
-            "SELECT * FROM invoices WHERE title <> '/*tenant*/'"
-        ))
-        .find(&db)
-        .await;
+        let result = Invoice::sql(sql!("SELECT * FROM invoices WHERE title <> '/*tenant*/'"))
+            .find(&db)
+            .await;
 
         assert!(
             result.is_err(),

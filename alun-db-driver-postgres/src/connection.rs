@@ -264,6 +264,9 @@ impl PostgresConnection {
 
     /// 开始事务。
     ///
+    /// `BEGIN` 走 simple query 协议（`batch_execute`）：语句文本固定、无参数，
+    /// PREPARE 没有复用价值，只会让一次事务边界多付一次往返。
+    ///
     /// # 错误
     ///
     /// `BEGIN` 执行失败时返回 [`DbError::Transaction`]。
@@ -271,7 +274,7 @@ impl PostgresConnection {
         // 事务边界逐出缓存：事务内准备的语句生命周期结束后不可复用
         self.purge_cache();
         self.client
-            .execute("BEGIN", &[])
+            .batch_execute("BEGIN")
             .await
             .map_err(|e| DbError::Transaction(e.to_string()))?;
         Ok(())
@@ -279,13 +282,15 @@ impl PostgresConnection {
 
     /// 提交事务。
     ///
+    /// 同 [`Self::begin`]，`COMMIT` 文本固定、无参数，走 simple query（1 次往返）。
+    ///
     /// # 错误
     ///
     /// `COMMIT` 执行失败时返回 [`DbError::Transaction`]。
     pub async fn commit(&self) -> Result<()> {
         self.purge_cache();
         self.client
-            .execute("COMMIT", &[])
+            .batch_execute("COMMIT")
             .await
             .map_err(|e| DbError::Transaction(e.to_string()))?;
         Ok(())
@@ -293,13 +298,15 @@ impl PostgresConnection {
 
     /// 回滚事务。
     ///
+    /// 同 [`Self::begin`]，`ROLLBACK` 文本固定、无参数，走 simple query（1 次往返）。
+    ///
     /// # 错误
     ///
     /// `ROLLBACK` 执行失败时返回 [`DbError::Transaction`]。
     pub async fn rollback(&self) -> Result<()> {
         self.purge_cache();
         self.client
-            .execute("ROLLBACK", &[])
+            .batch_execute("ROLLBACK")
             .await
             .map_err(|e| DbError::Transaction(e.to_string()))?;
         Ok(())

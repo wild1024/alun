@@ -6,14 +6,14 @@ description = "Alun database: Row 模式 + 事务 RAII + Hook + SQL 模板"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-alun-db-core  = { version = "0.3.0", path = "../alun-db-core" }
-alun-db-sql   = { version = "0.3.0", path = "../alun-db-sql" }
-alun-db-macro = { version = "0.3.0", path = "../alun-db-macro" }
+alun-db-core  = { version = "0.4.0", path = "../alun-db-core" }
+alun-db-sql   = { version = "0.4.0", path = "../alun-db-sql" }
+alun-db-macro = { version = "0.4.0", path = "../alun-db-macro" }
 
 # 驱动
-alun-db-driver-sqlite   = { version = "0.3.0", path = "../alun-db-driver-sqlite", optional = true }
-alun-db-driver-postgres = { version = "0.3.0", path = "../alun-db-driver-postgres", optional = true }
-alun-db-driver-mysql    = { version = "0.3.0", path = "../alun-db-driver-mysql", optional = true }
+alun-db-driver-sqlite   = { version = "0.4.0", path = "../alun-db-driver-sqlite", optional = true }
+alun-db-driver-postgres = { version = "0.4.0", path = "../alun-db-driver-postgres", optional = true }
+alun-db-driver-mysql    = { version = "0.4.0", path = "../alun-db-driver-mysql", optional = true }
 
 # 生态类型
 chrono       = { version = "0.4.45",  optional = true }
@@ -30,6 +30,8 @@ ipnetwork    = { version = "0.21.1",  optional = true }
 # 可观测性埋点（F10）：可选。DB 查询耗时/计数、多租户安全指标。
 metrics     = { workspace = true, optional = true }
 thiserror = "2.0.20"
+# 迁移内容指纹（SHA-256）：RustCrypto 实现，x86 平台含 SHA-NI 硬件加速路径
+sha2      = "0.10"
 tokio     = { version = "1.53", features = ["sync", "rt", "time"], optional = true }
 tracing   = "0.1"
 
@@ -67,12 +69,9 @@ ipnetwork    = ["dep:ipnetwork",    "alun-db-core/ipnetwork"]
 [dev-dependencies]
 # 自引用 dev 依赖：仅为本 crate 的测试 / 示例构建统一开启生态类型特性，
 # 使 `cargo test` 无需显式 `--features` 即可编译（生产功能不受影响）。
-# 不写 `version`：自引用无法从 registry 解析到自身尚未发布的版本，带 version 会导致
-# 首次发布报 `failed to select a version for the requirement \`alun-db = "^0.3.0"\``；
-# 仅写 path 时 cargo 打包会自动丢弃该条 dev-dependency，对下游无影响。
 alun-db = { path = ".", features = ["chrono", "time", "jiff", "rust_decimal", "bigdecimal", "uuid", "ulid", "json", "ipnetwork"] }
-alun-db-core = { version = "0.3.0", path = "../alun-db-core" }
-alun-db-sql  = { version = "0.3.0", path = "../alun-db-sql" }
+alun-db-core = { version = "0.4.0", path = "../alun-db-core" }
+alun-db-sql  = { version = "0.4.0", path = "../alun-db-sql" }
 tokio        = { version = "1.53", features = ["macros", "rt-multi-thread", "sync", "rt"] }
 chrono       = { version = "0.4.45", features = ["clock"] }
 time         = { version = "0.3.55" }
@@ -103,4 +102,4 @@ name = "tenant_isolation"
 harness = false
 
 [build-dependencies]
-alun-db-build = { version = "0.3.0", path = "../alun-db-build" }
+alun-db-build = { version = "0.4.0", path = "../alun-db-build" }

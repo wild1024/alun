@@ -109,11 +109,7 @@ async fn async_hook_is_transaction_aware() {
     })
     .await
     .expect("transaction commit");
-    assert_eq!(
-        take_record(),
-        vec!["insert:2"],
-        "提交成功后应触发异步 Hook"
-    );
+    assert_eq!(take_record(), vec!["insert:2"], "提交成功后应触发异步 Hook");
 
     // ── 3. 显式事务 + 回滚：绝不触发 ────────────────────────────────
     let outcome: Result<()> = db
@@ -127,10 +123,7 @@ async fn async_hook_is_transaction_aware() {
         })
         .await;
     assert!(outcome.is_err(), "闭包返回 Err 应导致回滚");
-    assert!(
-        take_record().is_empty(),
-        "回滚必须丢弃异步 Hook，不得触发"
-    );
+    assert!(take_record().is_empty(), "回滚必须丢弃异步 Hook，不得触发");
 
     // ── 4. update / delete 同样绑定提交边界，且保持调用顺序 ───────────
     db.transaction(|tx| async move {
@@ -213,9 +206,18 @@ async fn insert_many_dispatches_async_hooks_per_row() {
 
     // ── 1. 自动提交：每行一次，顺序与输入一致 ───────────────────────
     let items = vec![
-        BatchItem { id: 1, name: "a".into() },
-        BatchItem { id: 2, name: "b".into() },
-        BatchItem { id: 3, name: "c".into() },
+        BatchItem {
+            id: 1,
+            name: "a".into(),
+        },
+        BatchItem {
+            id: 2,
+            name: "b".into(),
+        },
+        BatchItem {
+            id: 3,
+            name: "c".into(),
+        },
     ];
     BatchItem::insert_many(&items, &db)
         .await
@@ -229,8 +231,14 @@ async fn insert_many_dispatches_async_hooks_per_row() {
     // ── 2. 事务内：提交前不触发，提交后按序触发 ─────────────────────
     db.transaction(|tx| async move {
         let more = vec![
-            BatchItem { id: 4, name: "d".into() },
-            BatchItem { id: 5, name: "e".into() },
+            BatchItem {
+                id: 4,
+                name: "d".into(),
+            },
+            BatchItem {
+                id: 5,
+                name: "e".into(),
+            },
         ];
         BatchItem::insert_many(&more, &tx).await?;
         assert!(
@@ -250,7 +258,10 @@ async fn insert_many_dispatches_async_hooks_per_row() {
     // ── 3. 回滚：一行都不触发 ───────────────────────────────────────
     let outcome: Result<()> = db
         .transaction(|tx| async move {
-            let doomed = vec![BatchItem { id: 6, name: "f".into() }];
+            let doomed = vec![BatchItem {
+                id: 6,
+                name: "f".into(),
+            }];
             BatchItem::insert_many(&doomed, &tx).await?;
             Err(DbError::InvalidValue("deliberate rollback".into()))
         })

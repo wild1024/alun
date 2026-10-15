@@ -716,7 +716,8 @@ fn group_left(s: &str) -> Result<Vec<u16>, String> {
 
 // ==================== INET / CIDR 编解码 ====================
 
-/// 编码 INET / CIDR 二进制：`family(1) bits(1) is_cidr(1) + 地址字节`。
+/// 编码 INET / CIDR 二进制（与 PG `inet_send` 线格式逐字节一致）：
+/// `family(1) bits(1) is_cidr(1) len(1) + 地址字节(len)`。
 fn encode_inet(addr: &IpAddr, prefix_len: u8, is_cidr: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(20);
     match addr {
@@ -724,19 +725,23 @@ fn encode_inet(addr: &IpAddr, prefix_len: u8, is_cidr: bool) -> Vec<u8> {
             out.push(2); // PGSQL_AF_INET
             out.push(prefix_len);
             out.push(is_cidr as u8);
+            out.push(4); // 地址字节数（varlen）
             out.extend_from_slice(&v4.octets());
         }
         IpAddr::V6(v6) => {
             out.push(3); // PGSQL_AF_INET6
             out.push(prefix_len);
             out.push(is_cidr as u8);
+            out.push(16); // 地址字节数（varlen）
             out.extend_from_slice(&v6.octets());
         }
     }
     out
 }
 
-/// 解码 INET / CIDR 二进制，返回地址与前缀长度（INET 读回时掩码丢弃）。
+/// 解码 INET / CIDR 二进制（与 PG `inet_send` 线格式一致：
+/// `family(1) bits(1) is_cidr(1) len(1) + 地址字节(len)`），
+/// 返回地址与前缀长度（INET 读回时掩码丢弃）。
 fn decode_inet(raw: &[u8]) -> Result<(IpAddr, u8), String> {
     if raw.len() < 4 {
         return Err("inet binary too short".into());
@@ -744,7 +749,14 @@ fn decode_inet(raw: &[u8]) -> Result<(IpAddr, u8), String> {
     let family = raw[0];
     let bits = raw[1];
     // raw[2] 为 is_cidr 标志，读回时由目标 Value 类型决定语义，不使用
-    let addr_bytes = &raw[3..];
+    // raw[3] 为地址字节数（varlen），必须据此切出地址——早期实现遗漏该字节、
+    // 直接从 raw[3..] 取地址，导致所有真实 inet 值解码失败（自造往返测试因
+    // 编码/解码同样处理而未能发现与 PG 线格式的不兼容）。
+    let addr_len = raw[3] as usize;
+    if raw.len() < 4 + addr_len {
+        return Err("inet binary truncated".into());
+    }
+    let addr_bytes = &raw[4..4 + addr_len];
     let addr = match family {
         2 => {
             if addr_bytes.len() != 4 {
@@ -896,6 +908,31 @@ mod tests {
         let (back, bits) = decode_inet(&bytes).expect("decode");
         assert_eq!(back, addr);
         assert_eq!(bits, 32);
+    }
+
+    /// 与 PG 真实线格式的兼容性（回归：早期实现遗漏 len 字节，所有真实值解码失败）。
+    ///
+    /// 字节取自真实服务端：`SELECT encode(inet_send('10.1.2.3'::inet), 'hex')`
+    /// → `022000040a010203`（family=2, bits=32, is_cidr=0, len=4, addr）。
+    #[test]
+    fn inet_matches_real_pg_wire_format() {
+        let raw = [0x02u8, 0x20, 0x00, 0x04, 10, 1, 2, 3];
+        let (addr, bits) = decode_inet(&raw).expect("decode real pg bytes");
+        assert_eq!(addr, "10.1.2.3".parse::<IpAddr>().expect("expected addr"));
+        assert_eq!(bits, 32);
+
+        // 编码端必须逐字节还原同一线格式
+        let encoded = encode_inet(&"10.1.2.3".parse::<IpAddr>().expect("expected addr"), 32, false);
+        assert_eq!(encoded, raw);
+
+        // IPv6：family=3, bits=128, is_cidr=0, len=16
+        let v6 = "2001:db8::1".parse::<IpAddr>().expect("expected v6");
+        let enc6 = encode_inet(&v6, 128, false);
+        assert_eq!(enc6.len(), 4 + 16);
+        assert_eq!(&enc6[..4], &[3, 128, 0, 16]);
+        let (back6, b6) = decode_inet(&enc6).expect("decode v6");
+        assert_eq!(back6, v6);
+        assert_eq!(b6, 128);
     }
 
     /// IPv6 与 CIDR 编解码往返：嵌入的 IPv4 映射地址与带掩码的网段一致。

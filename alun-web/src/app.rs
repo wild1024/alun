@@ -21,11 +21,11 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
 use tracing::info;
 
+use crate::api::{Res, codes};
 use crate::middleware as mw;
 use crate::resources::*;
 use crate::router::AlunRouter;
 use alun_config::{AppConfig, ConfigManager};
-use crate::api::{Res, codes};
 use alun_core::{PluginManager, Result};
 
 /// 应用运行时设置
@@ -66,6 +66,12 @@ pub struct App {
     settings: AppSettings,
     /// 配置管理器（文件加载 + 运行时动态配置）
     config_mgr: Option<Arc<ConfigManager>>,
+    /// 编译期嵌入的迁移器（[`App::migrate_embedded`] 注入；`migrate!` 宏产物）。
+    ///
+    /// 注入后 `[database.migration]` 的目录来源（`path` / `sources` / `seed_path`）
+    /// 不再使用——运行时不再依赖 `migrations/` 目录；执行选项仍取自配置。
+    #[cfg(feature = "db")]
+    embedded_migrator: Option<alun_db::Migrator>,
     /// 全局路由前缀（从 `router.prefix` 读取）
     prefix: String,
     /// 限流存储（跨请求共享，确保限流计数正确）
@@ -143,7 +149,7 @@ impl App {
     /// 公开方法，用于手动构建 App 的场景
     pub fn with_config_manager(cm: Arc<ConfigManager>) -> Result<Self> {
         let cfg = cm.get();
-        alun_log::init(&cfg.log);
+        alun_log::init_with_sql_logging(&cfg.log, cfg.database.sql_logging);
 
         let prefix = cfg.router.prefix.clone();
 
@@ -164,6 +170,8 @@ impl App {
             startup_hooks: Vec::new(),
             extra_permissions: Vec::new(),
             extra_no_auth: Vec::new(),
+            #[cfg(feature = "db")]
+            embedded_migrator: None,
         })
     }
 
@@ -291,6 +299,8 @@ impl App {
             startup_hooks: Vec::new(),
             extra_permissions: Vec::new(),
             extra_no_auth: Vec::new(),
+            #[cfg(feature = "db")]
+            embedded_migrator: None,
         });
         if let (Some(ref mut r), Some(sub_r)) = (self.router.as_mut(), sub.router) {
             r.merge(prefix, sub_r);
@@ -461,8 +471,30 @@ impl App {
     /// 生命周期与装配作用于**同一个实例**（内部以 `Arc` 共享，非两份副本）。
     pub fn web_plugin<P: crate::plugin::WebPlugin + 'static>(mut self, plugin: P) -> Self {
         let shared = Arc::new(plugin);
-        self.web_plugins.push(shared.clone() as Arc<dyn crate::plugin::WebPlugin>);
+        self.web_plugins
+            .push(shared.clone() as Arc<dyn crate::plugin::WebPlugin>);
         self.plugins = self.plugins.add(crate::plugin::WebPluginAdapter(shared));
+        self
+    }
+
+    /// 注入编译期嵌入的迁移（`migrate!` 宏产物）。
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// App::new()?
+    ///     .migrate_embedded(migrate!("migrations"))
+    ///     .start()
+    ///     .await
+    /// ```
+    ///
+    /// 注入后 `[database.migration]` 的目录来源（`path` / `sources` / `seed_path`）
+    /// 不再使用——运行时不再依赖 `migrations/` 目录，部署产物自包含；执行选项
+    /// （同步提交 / 单事务 / 指纹校验 / 前缀等）仍由配置统一提供，并**覆盖**
+    /// 注入器自带的（默认）选项。
+    #[cfg(feature = "db")]
+    pub fn migrate_embedded(mut self, migrator: alun_db::Migrator) -> Self {
+        self.embedded_migrator = Some(migrator);
         self
     }
 
@@ -804,8 +836,13 @@ impl App {
         }
 
         // 1. 先初始化全局资源（数据库、缓存、配置、模板）
+        //    编译期嵌入的迁移器（`migrate_embedded` 注入）随初始化一并传入。
+        #[cfg(feature = "db")]
+        let embedded_migrator = self.embedded_migrator.take();
+        #[cfg(not(feature = "db"))]
+        let embedded_migrator = ();
         if let Some(ref cm) = self.config_mgr {
-            Self::init_global_resources(cm).await?;
+            Self::init_global_resources(cm, embedded_migrator).await?;
         }
 
         // 1.1. 同步多租户全局开关：`#[tenant]` 属性仅在 `[tenant].enabled = true` 时生效，
@@ -846,11 +883,31 @@ impl App {
             }
         }
 
+        // 1.4. F10：提前**并行**初始化 Prometheus recorder——builder 段开销偶发
+        //      ~200ms（本机实测 1ms ↔ 208ms 双峰），与启动钩子 / 插件启动并行
+        //      执行可将它藏进启动流程；提前安装也让启动期埋点被更完整采集。
+        #[cfg(feature = "metrics-prometheus")]
+        let metrics_task = self
+            .config_mgr
+            .as_ref()
+            .map(|cm| cm.get().metrics.clone())
+            .filter(|mc| mc.enabled)
+            .map(|mc| {
+                let task_cfg = mc.clone();
+                (
+                    mc,
+                    tokio::spawn(async move { crate::metrics::install_prometheus(&task_cfg) }),
+                )
+            });
+
         // 1.5. 执行自定义启动钩子（可初始化自定义全局资源）
         //      按注册顺序执行；多模块各自注册时互不覆盖。
         let startup_hooks = std::mem::take(&mut self.startup_hooks);
         if !startup_hooks.is_empty() {
-            info!("执行 {} 个自定义启动钩子（按注册顺序）", startup_hooks.len());
+            info!(
+                "执行 {} 个自定义启动钩子（按注册顺序）",
+                startup_hooks.len()
+            );
         }
         for hook in startup_hooks {
             (hook)().await;
@@ -860,26 +917,45 @@ impl App {
         self.plugins
             .check_duplicate_names()
             .map_err(alun_core::Error::Config)?;
+        let plugins_started = Instant::now();
         self.plugins.start_all().await?;
+        info!(
+            elapsed_ms = plugins_started.elapsed().as_millis(),
+            "插件启动完成"
+        );
 
-        // 2.5. F10：安装 Prometheus recorder（**早于**插件启动，使启动期埋点也被采集）
+        // 2.5. F10：等待 Prometheus recorder 就绪（初始化已在 1.4 与启动流程并行）。
         #[cfg(feature = "metrics-prometheus")]
-        if let Some(ref cm) = self.config_mgr {
-            let mc = cm.get().metrics.clone();
-            if mc.enabled {
-                crate::metrics::install_prometheus(&mc)?;
-                let scope = if mc.allow_ips.is_empty() {
-                    "仅本机回环（[metrics].allow_ips 为空）".to_string()
-                } else {
-                    format!("白名单 {}", mc.allow_ips.join(", "))
-                };
-                info!("指标端点已启用 path={} 访问范围：{}", mc.path, scope);
+        if let Some((mc, task)) = metrics_task {
+            let wait_started = Instant::now();
+            match task.await {
+                Ok(Ok(())) => {
+                    let scope = if mc.allow_ips.is_empty() {
+                        "仅本机回环（[metrics].allow_ips 为空）".to_string()
+                    } else {
+                        format!("白名单 {}", mc.allow_ips.join(", "))
+                    };
+                    info!(
+                        "指标端点已启用 path={} 访问范围：{}（等待就绪 {}ms，初始化与启动钩子并行）",
+                        mc.path,
+                        scope,
+                        wait_started.elapsed().as_millis()
+                    );
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(join_err) => {
+                    return Err(alun_core::Error::Config(format!(
+                        "metrics 初始化任务异常退出: {join_err}"
+                    )));
+                }
             }
         }
 
-        // 3. 构建 Router 和中间件
+        // 3. 构建 Router 和中间件（分段打点，E 方案：定位构建热点）
+        let router_build_started = Instant::now();
         let router = self.router.take().unwrap_or_default();
         let mut axum_router: Router = router.into_axum();
+        let into_axum_ms = router_build_started.elapsed().as_millis();
 
         // 链内层（`App::route_layer`）：必须在 `build_middleware_chain` **之前**应用，
         // 这样后续添加的内置层会包裹在它外面，本层便位于 Auth / 权限 / 限流之内，
@@ -896,10 +972,13 @@ impl App {
         for layer in route_layers {
             axum_router = layer(axum_router);
         }
+        let route_layers_ms = router_build_started.elapsed().as_millis();
 
         axum_router = self.build_middleware_chain(axum_router);
+        let middleware_chain_ms = router_build_started.elapsed().as_millis();
         // 端点必须在链之后挂载（不穿中间件，见方法文档）
         axum_router = self.attach_metrics_endpoint(axum_router);
+        let metrics_endpoint_ms = router_build_started.elapsed().as_millis();
 
         // 静态文件服务 + 自定义 404 处理
         if let Some(ref cm) = self.config_mgr {
@@ -913,6 +992,7 @@ impl App {
                 axum_router = axum_router.fallback(Self::handle_not_found);
             }
         }
+        let static_files_ms = router_build_started.elapsed().as_millis();
 
         // 链外 Router 扩展序列：按注册顺序应用。
         // 多模块各自注册时不再互相覆盖（历史上 `Option` 会静默丢弃先注册者）；
@@ -929,6 +1009,16 @@ impl App {
         for ext in extensions {
             axum_router = ext(axum_router);
         }
+        let router_extensions_ms = router_build_started.elapsed().as_millis();
+        info!(
+            into_axum_ms,
+            route_layers_ms,
+            middleware_chain_ms,
+            metrics_endpoint_ms,
+            static_files_ms,
+            router_extensions_ms,
+            "Router 构建分段耗时（累计毫秒）"
+        );
 
         let bind_addr = self
             .config_mgr
@@ -1003,7 +1093,14 @@ impl App {
     }
 
     /// 初始化全局资源（数据库、缓存、配置、模板）
-    async fn init_global_resources(cm: &Arc<ConfigManager>) -> Result<()> {
+    ///
+    /// `embedded_migrator`：由 [`App::migrate_embedded`] 注入的编译期嵌入迁移器
+    /// （`migrate!` 宏产物）；`db` 特性关闭时为占位参数（该路径不使用迁移）。
+    async fn init_global_resources(
+        cm: &Arc<ConfigManager>,
+        #[cfg(feature = "db")] embedded_migrator: Option<alun_db::Migrator>,
+        #[cfg(not(feature = "db"))] _embedded_migrator: (),
+    ) -> Result<()> {
         set_config(cm.clone()).map_err(|e| alun_core::Error::Config(e.to_string()))?;
         let cfg = cfg();
 
@@ -1080,20 +1177,37 @@ impl App {
                             import_legacy: migration_cfg.import_legacy,
                             baseline_on_migrate: migration_cfg.baseline_on_migrate,
                             baseline_version,
+                            synchronous_commit: {
+                                let raw = migration_cfg.synchronous_commit.trim();
+                                (!raw.is_empty()).then(|| raw.to_string())
+                            },
+                            single_transaction: migration_cfg.single_transaction,
                             placeholders: migration_cfg.placeholders.clone(),
                             // 启动路径**绝不**允许破坏性操作：`reset` / `fresh`
                             // 只能由代码显式开启，避免配置失误重建生产库
                             is_destructive_allowed: false,
                         };
-                        let mut migrator = alun_db::Migrator::new().options(options);
-                        for dir in &sources {
-                            migrator = migrator.source_dir(dir.clone());
-                        }
-                        // 种子目录：未配置即不跑；配置了就必须存在（缺失由 Migrator 报错）
-                        if !migration_cfg.seed_path.trim().is_empty() {
-                            migrator =
-                                migrator.source_seed(migration_cfg.seed_path.trim().to_string());
-                        }
+                        // 来源：优先使用 [`App::migrate_embedded`] 注入的编译期嵌入迁移
+                        // （`migrate!` 宏产物，运行时不再依赖 migrations/ 目录）；否则
+                        // 按配置的目录来源构建。两条路径共用同一 options（配置统一覆盖）。
+                        let migrator = match embedded_migrator {
+                            Some(injected) => {
+                                info!("迁移来源：编译期嵌入（migrate! 宏），跳过目录扫描");
+                                injected.options(options)
+                            }
+                            None => {
+                                let mut built = alun_db::Migrator::new().options(options);
+                                for dir in &sources {
+                                    built = built.source_dir(dir.clone());
+                                }
+                                // 种子目录：未配置即不跑；配置了就必须存在（缺失由 Migrator 报错）
+                                if !migration_cfg.seed_path.trim().is_empty() {
+                                    built = built
+                                        .source_seed(migration_cfg.seed_path.trim().to_string());
+                                }
+                                built
+                            }
+                        };
 
                         match migrator.run(&db).await {
                             Ok(n) => info!("数据库迁移完成: 应用 {} 个迁移", n),
@@ -1205,11 +1319,17 @@ impl App {
         // 编译期注册的权限规则（`#[alun::permission]` / `#[alun::routes]` 模块）
         // + 插件贡献的规则（F5）。
         // 收集为 `Vec` 后传入：规则来自 `inventory`（非切片），故不能直接借用。
+        // 前置规则收集耗时（debug 级：排查装配热点用）
+        let collect_started = std::time::Instant::now();
         let mut macro_rules = crate::discovered_permissions();
         for plugin in &self.web_plugins {
             macro_rules.extend(plugin.permission_rules());
         }
-        self.build_middleware_chain_with(router, &macro_rules)
+        let collect_ms = collect_started.elapsed().as_millis();
+        let rule_count = macro_rules.len();
+        let router = self.build_middleware_chain_with(router, &macro_rules);
+        tracing::debug!(collect_ms, rule_count, "middleware_chain 前置规则收集完成");
+        router
     }
 
     /// `build_middleware_chain` 的实现体；宏注解规则由调用方注入
@@ -1224,6 +1344,8 @@ impl App {
     ) -> Router {
         if let Some(cm) = &self.config_mgr {
             let cfg = cm.get();
+            // 逐层应用耗时（debug 级：排查装配热点，函数尾部汇总输出）
+            let mut layer_timings: Vec<(&'static str, u128)> = Vec::new();
 
             // ── 内层（先添加）：业务逻辑中间件 ──
 
@@ -1238,10 +1360,12 @@ impl App {
                 if cfg.middleware.idempotency.enabled {
                     match try_cache() {
                         Some(c) => {
+                            let t_apply = std::time::Instant::now();
                             router = router.layer(mw::IdempotencyLayer::new(
                                 Arc::new(c.clone()),
                                 Duration::from_secs(cfg.middleware.idempotency.ttl_secs),
                             ));
+                            layer_timings.push(("idempotency", t_apply.elapsed().as_millis()));
                             info!(
                                 "幂等键中间件已启用 ttl={}s",
                                 cfg.middleware.idempotency.ttl_secs
@@ -1256,10 +1380,12 @@ impl App {
                 if cfg.middleware.nonce.enabled {
                     match try_cache() {
                         Some(c) => {
+                            let t_apply = std::time::Instant::now();
                             router = router.layer(mw::NonceLayer::new(
                                 Arc::new(c.clone()),
                                 Duration::from_secs(cfg.middleware.nonce.ttl_secs),
                             ));
+                            layer_timings.push(("nonce", t_apply.elapsed().as_millis()));
                             info!(
                                 "Nonce 防重放中间件已启用 ttl={}s",
                                 cfg.middleware.nonce.ttl_secs
@@ -1273,7 +1399,9 @@ impl App {
             }
 
             if cfg.middleware.compression.enabled {
+                let t_apply = std::time::Instant::now();
                 router = router.layer(CompressionLayer::new().gzip(true));
+                layer_timings.push(("compression", t_apply.elapsed().as_millis()));
             }
 
             if cfg.middleware.rate_limit.enabled {
@@ -1282,7 +1410,9 @@ impl App {
                     window_secs: cfg.middleware.rate_limit.window_secs,
                     store: self.rate_limit_store.clone(),
                 };
+                let t_apply = std::time::Instant::now();
                 router = router.layer(rl_layer);
+                layer_timings.push(("rate_limit", t_apply.elapsed().as_millis()));
             }
 
             // 权限校验中间件：合并配置文件规则 + 宏注解规则
@@ -1298,17 +1428,19 @@ impl App {
             // - 无任何规则 → 完全不挂载，与修复前一致（零开销、响应不变）。
             // 宏注解规则的路径与路由宏同源（均为「不含前缀」的声明），
             // 因此这里统一拼接全局前缀后再参与匹配，保证与嵌套后的实际请求路径一致。
+            let perm_asm_started = std::time::Instant::now();
             let mut perm_layer =
                 mw::PermissionCheckLayer::from_config(&cfg.middleware.permission.rules);
             // 两条来源合并：链接期切片（`#[permission]`）+ 显式注册（`#[alun::routes]`）。
             // 后者不依赖链接器段收集，因此在切片失效的工具链上仍然生效。
             for def in macro_rules.iter().chain(self.extra_permissions.iter()) {
-                perm_layer.rules.push(mw::PermissionRule {
+                perm_layer.push_rule(mw::PermissionRule {
                     path: with_prefix(&self.prefix, def.path),
                     methods: vec![def.method.to_string()],
                     permission: def.permission.to_string(),
                 });
             }
+            layer_timings.push(("perm_assembly", perm_asm_started.elapsed().as_millis()));
             let macro_rule_count = macro_rules.len() + self.extra_permissions.len();
             let config_rule_count = cfg.middleware.permission.rules.len();
             let enabled = cfg.middleware.permission.enabled;
@@ -1326,7 +1458,9 @@ impl App {
                     "检测到 {} 条 #[permission] 规则 + {} 条配置规则 → 已启用权限校验层",
                     macro_rule_count, config_rule_count
                 );
+                let t_apply = std::time::Instant::now();
                 router = router.layer(perm_layer);
+                layer_timings.push(("permission", t_apply.elapsed().as_millis()));
             }
 
             // 多租户上下文中间件：由 `[tenant].enabled` 声明式接入。
@@ -1342,10 +1476,12 @@ impl App {
                     .iter()
                     .map(|p| with_prefix(&self.prefix, p))
                     .collect();
+                let t_apply = std::time::Instant::now();
                 router = router.layer(mw::TenantLayer {
                     claim: cfg.tenant.claim.clone(),
                     ignore_paths: tenant_ignore,
                 });
+                layer_timings.push(("tenant", t_apply.elapsed().as_millis()));
                 info!(
                     "多租户中间件已启用 claim={} column={} write_enabled={}",
                     cfg.tenant.claim, cfg.tenant.column, cfg.tenant.write_enabled
@@ -1353,6 +1489,7 @@ impl App {
             }
 
             if cfg.middleware.auth.enabled && !cfg.middleware.auth.jwt_secret.is_empty() {
+                let auth_asm_started = std::time::Instant::now();
                 let mut ignore: Vec<String> = cfg
                     .middleware
                     .auth
@@ -1388,7 +1525,10 @@ impl App {
                     #[cfg(feature = "cache")]
                     cache,
                 };
+                layer_timings.push(("auth_assembly", auth_asm_started.elapsed().as_millis()));
+                let t_apply = std::time::Instant::now();
                 router = router.layer(auth_layer);
+                layer_timings.push(("auth", t_apply.elapsed().as_millis()));
             }
 
             // ── 外层（后添加）：请求追踪 + 跨域 + 安全头 ──
@@ -1396,7 +1536,9 @@ impl App {
             // 确保认证 401 响应也携带 CORS 头和安全头。
 
             if cfg.middleware.request_id {
+                let t_apply = std::time::Instant::now();
                 router = router.layer(mw::RequestIdLayer);
+                layer_timings.push(("request_id", t_apply.elapsed().as_millis()));
             }
 
             if cfg.middleware.request_log {
@@ -1410,7 +1552,9 @@ impl App {
                     exclude_paths: prefix_excluded,
                     log_duration: log_cfg.log_duration,
                 };
+                let t_apply = std::time::Instant::now();
                 router = router.layer(log_layer);
+                layer_timings.push(("request_log", t_apply.elapsed().as_millis()));
             }
 
             if cfg.middleware.cors.enabled {
@@ -1455,7 +1599,9 @@ impl App {
                 cors = cors.max_age(std::time::Duration::from_secs(
                     cfg.middleware.cors.max_age_secs,
                 ));
+                let t_apply = std::time::Instant::now();
                 router = router.layer(cors);
+                layer_timings.push(("cors", t_apply.elapsed().as_millis()));
             }
 
             // F10：HTTP 指标埋点。
@@ -1471,17 +1617,22 @@ impl App {
             if cfg.metrics.http {
                 let mut excluded = vec![with_prefix(&self.prefix, "/health")];
                 excluded.push(cfg.metrics.path.clone());
+                let t_apply = std::time::Instant::now();
                 router = router.layer(crate::metrics::MetricsLayer {
                     exclude_paths: excluded,
                 });
+                layer_timings.push(("metrics_http", t_apply.elapsed().as_millis()));
             }
 
             // 安全头：最后添加（最外层），确保所有响应（含 401/403/500）都携带安全头
             if cfg.middleware.security_headers.enabled {
+                let t_apply = std::time::Instant::now();
                 router = router.layer(mw::SecurityHeadersLayer::new(
                     cfg.middleware.security_headers.clone(),
                 ));
+                layer_timings.push(("security_headers", t_apply.elapsed().as_millis()));
             }
+            tracing::debug!("middleware_chain 逐层耗时（毫秒）: {:?}", layer_timings);
         }
         router
     }
@@ -1506,6 +1657,8 @@ impl Default for App {
             startup_hooks: Vec::new(),
             extra_permissions: Vec::new(),
             extra_no_auth: Vec::new(),
+            #[cfg(feature = "db")]
+            embedded_migrator: None,
         }
     }
 }
@@ -1905,7 +2058,8 @@ mod tests {
         );
 
         let weak = access_token(&cfg, &[]);
-        let (denied, body) = get_with_bearer(&router, "/api/perm-rule-demo/orders", Some(&weak)).await;
+        let (denied, body) =
+            get_with_bearer(&router, "/api/perm-rule-demo/orders", Some(&weak)).await;
         assert_eq!(
             denied,
             StatusCode::FORBIDDEN,
@@ -1913,7 +2067,8 @@ mod tests {
         );
 
         let allowed = access_token(&cfg, &["order:read"]);
-        let (ok, body) = get_with_bearer(&router, "/api/perm-rule-demo/orders", Some(&allowed)).await;
+        let (ok, body) =
+            get_with_bearer(&router, "/api/perm-rule-demo/orders", Some(&allowed)).await;
         assert_eq!(ok, StatusCode::OK, "持有权限的请求不得被误伤: {body}");
     }
 

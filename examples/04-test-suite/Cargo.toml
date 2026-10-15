@@ -12,7 +12,7 @@ publish = false
 # （librdkafka 需完整 Unix 构建链），导致在受限环境下无法运行。
 #
 # 注意：`sqlite` 必须显式声明——`db` 只是"数据库能力"，**不再隐含驱动**。
-alun = { path = "../../alun", default-features = false, features = ["sqlite", "cache", "template", "fs-local", "config"] }
+alun = { version = "0.4.0", path = "../../alun", default-features = false, features = ["sqlite", "cache", "template", "fs-local", "config"] }
 alun-core = { workspace = true }
 alun-web = { workspace = true, features = ["sqlite", "cache", "template", "config"] }
 alun-db = { workspace = true, features = ["sqlite"] }

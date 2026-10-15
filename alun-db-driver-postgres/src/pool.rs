@@ -56,9 +56,34 @@ impl PostgresPool {
             config,
         };
 
-        // 预热：逐条建立，任一失败即中止建池
-        for _ in 0..warmup {
-            let conn = PostgresConnection::connect(url).await?;
+        // 预热：**并发**建立，任一失败即中止建池。
+        //
+        // 逐条串行建连时每条连接都要付一次完整握手（TCP + 认证），`min_connections`
+        // 稍大就会线性拖慢启动；并发建立后总耗时约为单条连接的握手时间。连接入栈
+        // 顺序对池语义无影响（借出时统一复用），因此不保证与创建顺序一致。
+        let conns = if warmup > 1 {
+            let mut set = tokio::task::JoinSet::new();
+            for _ in 0..warmup {
+                let url = url.to_string();
+                set.spawn(async move { PostgresConnection::connect(&url).await });
+            }
+            let mut conns = Vec::with_capacity(warmup);
+            while let Some(joined) = set.join_next().await {
+                let conn = joined.map_err(|e| {
+                    DbError::Connection(format!("pool warmup task failed: {e}").into())
+                })??;
+                conns.push(conn);
+            }
+            conns
+        } else {
+            let mut conns = Vec::with_capacity(warmup);
+            for _ in 0..warmup {
+                conns.push(PostgresConnection::connect(url).await?);
+            }
+            conns
+        };
+
+        for conn in conns {
             push_idle(&inner, conn)?;
         }
 

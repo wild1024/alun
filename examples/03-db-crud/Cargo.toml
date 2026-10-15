@@ -5,8 +5,8 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-alun = { path = "../../alun", features = ["mini"] }
-alun-utils = { path = "../../alun-utils" }
+alun = { version = "0.4.0", path = "../../alun", features = ["mini"] }
+alun-utils = { version = "0.4.0", path = "../../alun-utils" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

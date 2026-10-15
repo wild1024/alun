@@ -110,6 +110,31 @@ pub(crate) trait RawTransaction: Send {
         stmt: Statement,
     ) -> Pin<Box<dyn Future<Output = Result<Rows>> + Send + '_>>;
 
+    /// 本驱动的事务是否支持「整段脚本一次执行」（multi-statement 协议）。
+    ///
+    /// 默认 `false`：调用方逐条执行。PostgreSQL（simple query 协议）等支持批量的
+    /// 驱动覆盖为 `true`——迁移这类「大量互不相同的一次性语句」场景下，往返次数
+    /// 从 `O(语句数 × 2)` 降到 `O(1)`，首次全量迁移耗时约减半。
+    fn supports_script(&self) -> bool {
+        false
+    }
+
+    /// 事务内执行整段多语句脚本（`;` 分隔，不支持参数绑定）。
+    ///
+    /// 仅在 [`Self::supports_script`] 返回 `true` 的驱动上调用；默认实现返回
+    /// [`DbError::UnsupportedFeature`]。执行失败时事务进入 aborted 状态，由调用方回滚。
+    fn execute_script_raw(
+        &mut self,
+        _sql: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
+        Box::pin(async move {
+            Err(DbError::UnsupportedFeature {
+                feature: "transaction execute_script",
+                dialect: "unsupported".to_string(),
+            })
+        })
+    }
+
     /// 提交事务。消耗句柄。
     fn commit_raw(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
@@ -234,6 +259,20 @@ impl RawTransaction for alun_db_driver_postgres::PostgresPoolTransaction {
         stmt: Statement,
     ) -> Pin<Box<dyn Future<Output = Result<Rows>> + Send + '_>> {
         Box::pin(async move { self.query_stmt(&stmt).await })
+    }
+
+    /// PG 支持 simple query 协议：整段脚本一条消息发送，服务端逐句执行。
+    fn supports_script(&self) -> bool {
+        true
+    }
+
+    fn execute_script_raw(
+        &mut self,
+        sql: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
+        // 脚本转 owned 移入 future：future 只借用 `self`（与 `execute_raw` 同型）
+        let sql = sql.to_string();
+        Box::pin(async move { self.execute_script(&sql).await })
     }
 
     fn commit_raw(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {

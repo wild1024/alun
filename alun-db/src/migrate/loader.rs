@@ -48,6 +48,11 @@ pub(crate) struct LoadedMigration {
     pub source: Option<PathBuf>,
     /// 是否禁用事务包装（`-- +no-transaction`）。
     pub is_no_transaction: bool,
+    /// 正向脚本的内容指纹缓存（惰性）。
+    ///
+    /// 一次 `run` 中同一迁移会被多处比对指纹（`verify_checksums` 与执行前判定），
+    /// 缓存后每条迁移的 SHA-256 只计算一次；语义与逐处重算完全一致。
+    pub(crate) checksum_cache: std::sync::OnceLock<String>,
 }
 
 impl LoadedMigration {
@@ -61,6 +66,18 @@ impl LoadedMigration {
             self.version.clone(),
             self.name.clone(),
         )
+    }
+
+    /// 正向脚本的内容指纹（惰性计算并进程内缓存）。
+    ///
+    /// # 为什么缓存
+    ///
+    /// 同一迁移在一次 `run` 中会被多处比对指纹（`verify_checksums` 与执行前判定），
+    /// 逐处重算会让每条迁移的脚本在一轮启动里被哈希两遍。这里用 `OnceLock`
+    /// 只算一次——指纹只取决于 `up` 内容，而 `LoadedMigration` 一旦加载完成即不可变。
+    pub(crate) fn checksum(&self) -> &str {
+        self.checksum_cache
+            .get_or_init(|| super::history::checksum::content_checksum(&self.up))
     }
 }
 
@@ -135,6 +152,7 @@ impl Slots {
                 down,
                 source: entry.source,
                 is_no_transaction: entry.is_no_transaction,
+                checksum_cache: std::sync::OnceLock::new(),
             });
         }
         for ((kind, name), entry) in self.named {
@@ -147,6 +165,7 @@ impl Slots {
                 down,
                 source: entry.source,
                 is_no_transaction: entry.is_no_transaction,
+                checksum_cache: std::sync::OnceLock::new(),
             });
         }
         Ok(out)
@@ -299,6 +318,7 @@ pub(crate) fn load_single_file_as(
         down,
         source: Some(path.to_path_buf()),
         is_no_transaction,
+        checksum_cache: std::sync::OnceLock::new(),
     })
 }
 
@@ -328,19 +348,34 @@ fn resolve_scripts(
 ///
 /// 符号链接不跟随（`file_type()` 不解引用），因此不会因软链成环而无限递归。
 fn collect_dir(dir: &Path, options: &MigratorOptions, slots: &mut Slots) -> Result<()> {
+    let mut files = Vec::new();
+    gather_sql_files(dir, "migrations", &mut files)?;
+    for (path, content) in read_files_parallel(&files)? {
+        let filename = file_name_of(&path)?;
+        merge_slot(&filename, &content, Some(&path), false, options, slots)?;
+    }
+    Ok(())
+}
+
+/// 递归收集目录下的 `.sql` 文件路径（只做 `read_dir`，不读内容）。
+///
+/// 拆出「收集路径」与「读取内容」两阶段，是为了让内容读取可以并行
+/// （见 [`read_files_parallel`]）：大目录下逐文件串行 `read_to_string`
+/// 是启动加载迁移的主要耗时来源之一。
+fn gather_sql_files(dir: &Path, label: &str, out: &mut Vec<PathBuf>) -> Result<()> {
     let read_dir = fs::read_dir(dir)
-        .map_err(|e| DbError::Migration(format!("read migrations dir '{}': {e}", dir.display())))?;
+        .map_err(|e| DbError::Migration(format!("read {label} dir '{}': {e}", dir.display())))?;
 
     for entry in read_dir {
         let entry = entry.map_err(|e| {
-            DbError::Migration(format!("list migrations dir '{}': {e}", dir.display()))
+            DbError::Migration(format!("list {label} dir '{}': {e}", dir.display()))
         })?;
         let file_type = entry
             .file_type()
             .map_err(|e| DbError::Migration(format!("inspect {}: {e}", entry.path().display())))?;
 
         if file_type.is_dir() {
-            collect_dir(&entry.path(), options, slots)?;
+            gather_sql_files(&entry.path(), label, out)?;
             continue;
         }
         if !file_type.is_file() {
@@ -351,52 +386,58 @@ fn collect_dir(dir: &Path, options: &MigratorOptions, slots: &mut Slots) -> Resu
         if strip_sql_suffix(&filename).is_none() {
             continue;
         }
-        let content = read_migration_sql(&entry.path())?;
-        merge_slot(
-            &filename,
-            &content,
-            Some(&entry.path()),
-            false,
-            options,
-            slots,
-        )?;
+        out.push(entry.path());
     }
     Ok(())
 }
 
+/// 并行读取迁移文件内容（保序）。
+///
+/// 小目录（< 8 个文件）直接串行，避免线程调度开销反超收益；大目录按
+/// `available_parallelism`（上限 8）分块并行读取。返回顺序与输入顺序一致，
+/// 因此后续槽位合并与错误定位与串行实现完全相同。
+fn read_files_parallel(files: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
+    const SERIAL_THRESHOLD: usize = 8;
+    if files.len() < SERIAL_THRESHOLD {
+        return files.iter().map(read_file_with_path).collect();
+    }
+
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get().min(8))
+        .unwrap_or(4)
+        .min(files.len());
+    let chunk = files.len().div_ceil(workers);
+
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for part in files.chunks(chunk) {
+            handles.push(scope.spawn(move || -> Result<Vec<(PathBuf, String)>> {
+                part.iter().map(read_file_with_path).collect()
+            }));
+        }
+        let mut out = Vec::with_capacity(files.len());
+        for handle in handles {
+            let part = handle
+                .join()
+                .map_err(|_| DbError::Migration("migration file reader panicked".to_string()))??;
+            out.extend(part);
+        }
+        Ok(out)
+    })
+}
+
+/// 读取单个迁移文件，返回 `(路径, 内容)`。
+fn read_file_with_path(path: &PathBuf) -> Result<(PathBuf, String)> {
+    Ok((path.clone(), read_migration_sql(path)?))
+}
+
 /// 收集整目录的种子脚本：所有 `.sql` 一律按 [`MigrationKind::Seed`] 装载。
 fn collect_seed_dir(dir: &Path, options: &MigratorOptions, slots: &mut Slots) -> Result<()> {
-    let read_dir = fs::read_dir(dir)
-        .map_err(|e| DbError::Migration(format!("read seed dir '{}': {e}", dir.display())))?;
-
-    for entry in read_dir {
-        let entry = entry
-            .map_err(|e| DbError::Migration(format!("list seed dir '{}': {e}", dir.display())))?;
-        let file_type = entry
-            .file_type()
-            .map_err(|e| DbError::Migration(format!("inspect {}: {e}", entry.path().display())))?;
-
-        if file_type.is_dir() {
-            collect_seed_dir(&entry.path(), options, slots)?;
-            continue;
-        }
-        if !file_type.is_file() {
-            continue;
-        }
-
-        let filename = entry.file_name().to_string_lossy().into_owned();
-        if strip_sql_suffix(&filename).is_none() {
-            continue;
-        }
-        let content = read_migration_sql(&entry.path())?;
-        merge_slot(
-            &filename,
-            &content,
-            Some(&entry.path()),
-            true,
-            options,
-            slots,
-        )?;
+    let mut files = Vec::new();
+    gather_sql_files(dir, "seed", &mut files)?;
+    for (path, content) in read_files_parallel(&files)? {
+        let filename = file_name_of(&path)?;
+        merge_slot(&filename, &content, Some(&path), true, options, slots)?;
     }
     Ok(())
 }
@@ -1060,6 +1101,7 @@ mod tests {
             down: String::new(),
             source: None,
             is_no_transaction: false,
+            checksum_cache: std::sync::OnceLock::new(),
         };
         let v10 = LoadedMigration {
             kind: MigrationKind::Versioned,

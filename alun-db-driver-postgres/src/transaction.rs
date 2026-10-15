@@ -66,6 +66,26 @@ impl PostgresPoolTransaction {
         pooled.conn().query_stmt(stmt).await
     }
 
+    /// 事务内执行整段脚本（simple query 协议，多语句一条消息发送）。
+    ///
+    /// `batch_execute` 走 simple query 协议：整段脚本一次发往服务端，由服务端
+    /// 逐句解析执行，无需逐条 PREPARE / Bind——迁移等「大量互不相同的一次性语句」
+    /// 场景的往返次数从 `O(语句数 × 2)` 降到 `O(1)`。
+    ///
+    /// 语句执行在当前事务内（同一连接）；任一语句失败返回错误并让事务进入
+    /// aborted 状态，由调用方回滚。
+    ///
+    /// # 错误
+    ///
+    /// 事务已终结或脚本执行失败时返回 [`DbError`]。
+    pub async fn execute_script(&self, sql: &str) -> Result<()> {
+        let pooled = self
+            .pooled
+            .as_ref()
+            .ok_or_else(|| DbError::Transaction("transaction already finished".into()))?;
+        pooled.conn().execute_script_async(sql).await
+    }
+
     /// 提交事务。幂等：已终结时直接返回 `Ok`。
     ///
     /// # 错误

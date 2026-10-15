@@ -150,8 +150,7 @@ mod xlsx_impl {
     fn write_cell(ws: &mut Worksheet, row: u32, col: u16, v: &str) -> Result<()> {
         if v.is_empty() {
             // 显式留空，让列宽/边框仍然作用于该单元格
-            ws.write_blank(row, col, &Format::new())
-                .map_err(map_err)?;
+            ws.write_blank(row, col, &Format::new()).map_err(map_err)?;
             return Ok(());
         }
         match classify(v) {
@@ -182,7 +181,11 @@ mod xlsx_impl {
     }
 
     impl<'a> XlsxSheet<'a> {
-        pub fn new(name: &'a str, columns: &'a [&'a str], rows: &'a [HashMap<String, String>]) -> Self {
+        pub fn new(
+            name: &'a str,
+            columns: &'a [&'a str],
+            rows: &'a [HashMap<String, String>],
+        ) -> Self {
             Self {
                 name,
                 columns,
@@ -202,7 +205,10 @@ mod xlsx_impl {
         /// // Content-Type: application/vnd.openxmlformats-officedocument
         /// //              .spreadsheetml.sheet
         /// ```
-        pub fn to_xlsx_bytes(columns: &[&str], rows: &[HashMap<String, String>]) -> Result<Vec<u8>> {
+        pub fn to_xlsx_bytes(
+            columns: &[&str],
+            rows: &[HashMap<String, String>],
+        ) -> Result<Vec<u8>> {
             Self::to_xlsx_workbook(&[XlsxSheet::new("Sheet1", columns, rows)])
         }
 
@@ -270,7 +276,8 @@ mod xlsx_impl {
     // ── 读 ───────────────────────────────────────────────────
 
     fn open(data: &[u8]) -> Result<Xlsx<Cursor<&[u8]>>> {
-        open_workbook_from_rs(Cursor::new(data)).map_err(|e| Error::Msg(format!("XLSX解析失败: {}", e)))
+        open_workbook_from_rs(Cursor::new(data))
+            .map_err(|e| Error::Msg(format!("XLSX解析失败: {}", e)))
     }
 
     fn cell_to_string(d: &Data) -> String {
@@ -423,8 +430,8 @@ mod tests {
 
     #[test]
     fn roundtrip_preserves_header_and_values() {
-        let bytes = Export::to_xlsx_bytes(&["id", "name"], &[row("1", "Alice"), row("2", "Bob")])
-            .unwrap();
+        let bytes =
+            Export::to_xlsx_bytes(&["id", "name"], &[row("1", "Alice"), row("2", "Bob")]).unwrap();
         let rows = Import::from_xlsx(&bytes).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].get("id").unwrap(), "1");
@@ -448,7 +455,10 @@ mod tests {
         let mut wb: calamine::Xlsx<_> =
             calamine::open_workbook_from_rs(std::io::Cursor::new(bytes.as_slice())).unwrap();
         let range = wb.worksheet_range("Sheet1").unwrap();
-        assert!(matches!(range.get((1, 0)), Some(Data::Float(_)) | Some(Data::Int(_))));
+        assert!(matches!(
+            range.get((1, 0)),
+            Some(Data::Float(_)) | Some(Data::Int(_))
+        ));
     }
 
     #[test]
@@ -463,9 +473,14 @@ mod tests {
 
         let names = Import::xlsx_sheet_names(&bytes).unwrap();
         assert_eq!(names, vec!["用户".to_string(), "订单".to_string()]);
-        assert_eq!(Import::from_xlsx(&bytes).unwrap()[0].get("name").unwrap(), "Alice");
         assert_eq!(
-            Import::from_xlsx_sheet(&bytes, "订单").unwrap()[0].get("name").unwrap(),
+            Import::from_xlsx(&bytes).unwrap()[0].get("name").unwrap(),
+            "Alice"
+        );
+        assert_eq!(
+            Import::from_xlsx_sheet(&bytes, "订单").unwrap()[0]
+                .get("name")
+                .unwrap(),
             "Zoe"
         );
     }
@@ -477,7 +492,16 @@ mod tests {
             id: i64,
             name: String,
         }
-        let items = [Item { id: 1, name: "A".into() }, Item { id: 2, name: "B".into() }];
+        let items = [
+            Item {
+                id: 1,
+                name: "A".into(),
+            },
+            Item {
+                id: 2,
+                name: "B".into(),
+            },
+        ];
         let bytes = Export::to_xlsx_typed(&["id", "name"], &items).unwrap();
         let back: Vec<Item> = Import::from_xlsx_typed(&bytes).unwrap();
         assert_eq!(back, items);

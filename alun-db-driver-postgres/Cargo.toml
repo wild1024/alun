@@ -6,8 +6,8 @@ description = "alun-db PostgreSQL 驱动"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-alun-db-core = { version = "0.3.0", path = "../alun-db-core" }
-alun-db-sql  = { version = "0.3.0", path = "../alun-db-sql" }
+alun-db-core = { version = "0.4.0", path = "../alun-db-core" }
+alun-db-sql  = { version = "0.4.0", path = "../alun-db-sql" }
 
 tokio        = { version = "1.53", features = ["rt", "sync", "time"] }
 tokio-postgres = "0.7.18"

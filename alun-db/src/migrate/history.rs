@@ -244,19 +244,123 @@ pub(crate) async fn load_applied(db: &Db) -> Result<AppliedMap> {
 
 /// 在事务内写入（或覆盖）一条记录。
 ///
-/// 采用「先删后插」而非方言各异的 UPSERT 语法（`ON CONFLICT` / `ON DUPLICATE KEY`），
-/// 保证三方言通用；常规应用路径下删除是无操作。
+/// 优先使用**单条 UPSERT**（PostgreSQL / SQLite 为 `ON CONFLICT ... DO UPDATE`，
+/// MySQL 为 `ON DUPLICATE KEY UPDATE`）：相比「先删后插」少一条语句，省一次
+/// PREPARE + EXECUTE 往返——全量首迁 40 条记录合计约省 80 次往返。
+/// 未识别的方言回退[「先删后插」](replace_record_in_tx)，保持通用性兜底。
 pub(crate) async fn upsert_in_tx(tx: &Transaction, record: &RecordWrite) -> Result<()> {
-    let params = vec![
-        Value::Text(record.kind.as_str().to_string()),
-        Value::Text(truncate_name(&record.name)),
-    ];
+    let sql = match tx.dialect().name() {
+        "postgres" | "sqlite" => format!(
+            "INSERT INTO {MIGRATIONS_TABLE} {RECORD_COLUMNS} VALUES {RECORD_PLACEHOLDERS} \
+             ON CONFLICT (kind, name) DO UPDATE SET {UPSERT_SET_EXCLUDED}"
+        ),
+        "mysql" => format!(
+            "INSERT INTO {MIGRATIONS_TABLE} {RECORD_COLUMNS} VALUES {RECORD_PLACEHOLDERS} \
+             ON DUPLICATE KEY UPDATE {UPSERT_SET_VALUES}"
+        ),
+        _ => {
+            replace_record_in_tx(tx, record).await?;
+            return Ok(());
+        }
+    };
+    tx.execute_with_params(&sql, record_values(record)).await?;
+    Ok(())
+}
+
+/// 「先删后插」写入（未识别方言的兜底路径；常规应用路径下删除是无操作）。
+async fn replace_record_in_tx(tx: &Transaction, record: &RecordWrite) -> Result<()> {
     tx.execute_with_params(
         &format!("DELETE FROM {MIGRATIONS_TABLE} WHERE kind = ? AND name = ?"),
-        params,
+        vec![
+            Value::Text(record.kind.as_str().to_string()),
+            Value::Text(truncate_name(&record.name)),
+        ],
     )
     .await?;
+    tx.execute_with_params(
+        &format!("INSERT INTO {MIGRATIONS_TABLE} {RECORD_COLUMNS} VALUES {RECORD_PLACEHOLDERS}"),
+        record_values(record),
+    )
+    .await?;
+    Ok(())
+}
 
+/// 在事务内写入一条**执行成功**记录（迁移应用路径专用，可走 simple query 快路径）。
+///
+/// 驱动支持 multi-statement 协议（`supports_script`，如 PostgreSQL）时，改用
+/// **值内联**的单条 UPSERT 走 simple query：省去 PREPARE + 参数绑定的一次往返
+/// （每迁移 2 → 1 次；跨网络部署收益更明显）。值全部来自内部（种类 / 迁移名 /
+/// 十六进制指纹 / 整数 / 状态），转义只需单引号翻倍——该路径仅 PG / SQLite
+/// 触达（两方言中反斜杠都不是字符串转义字符）。不支持 script 的驱动走参数化路径。
+pub(crate) async fn write_apply_record(tx: &Transaction, record: &RecordWrite) -> Result<()> {
+    if tx.supports_script().await {
+        tx.execute_script(&render_upsert_script(record)).await
+    } else {
+        upsert_in_tx(tx, record).await
+    }
+}
+
+/// 渲染「单条 UPSERT、值内联」的记录写入脚本（PostgreSQL / SQLite 的
+/// `ON CONFLICT ... DO UPDATE` 语法；含结尾分号，可整段作为 simple query 发送）。
+fn render_upsert_script(record: &RecordWrite) -> String {
+    let version = match &record.version {
+        Some(v) => sql_literal(v.as_str()),
+        None => "NULL".to_string(),
+    };
+    let checksum = match &record.checksum {
+        Some(c) => sql_literal(c),
+        None => "NULL".to_string(),
+    };
+    let execution_ms = match record.execution_ms {
+        Some(ms) => ms.to_string(),
+        None => "NULL".to_string(),
+    };
+    let source = match &record.source {
+        Some(s) => sql_literal(&truncate_source(s)),
+        None => "NULL".to_string(),
+    };
+    format!(
+        "INSERT INTO {MIGRATIONS_TABLE} {RECORD_COLUMNS} VALUES (\
+         {}, {}, {version}, {checksum}, {}, {}, {}, {execution_ms}, {}, {source}) \
+         ON CONFLICT (kind, name) DO UPDATE SET {UPSERT_SET_EXCLUDED};",
+        sql_literal(record.kind.as_str()),
+        sql_literal(&truncate_name(&record.name)),
+        sql_literal(record.applied_via.as_str()),
+        now_epoch_secs(),
+        record.seq,
+        if record.is_success { "TRUE" } else { "FALSE" },
+    )
+}
+
+/// 把字符串编码为 SQL 字面量（单引号翻倍）。
+///
+/// 仅用于 **PG / SQLite** 的 simple query 快路径：这两个方言中反斜杠不是
+/// 字符串转义字符，无需额外处理；MySQL 不触达此路径（其走参数化
+/// [`upsert_in_tx`]）。
+fn sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// 记录表的列清单（`INSERT` 与各写入路径共用）。
+const RECORD_COLUMNS: &str = "(kind, name, version, checksum, applied_via, applied_at, applied_seq, execution_ms, success, source)";
+
+/// 记录表的 `VALUES` 占位符（`?` 由框架模板按方言转换）。
+const RECORD_PLACEHOLDERS: &str = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+/// UPSERT 的 `SET` 段：PostgreSQL / SQLite 用 `excluded.*` 引用「拟插入」的新值。
+const UPSERT_SET_EXCLUDED: &str = "version = excluded.version, checksum = excluded.checksum, \
+     applied_via = excluded.applied_via, applied_at = excluded.applied_at, \
+     applied_seq = excluded.applied_seq, execution_ms = excluded.execution_ms, \
+     success = excluded.success, source = excluded.source";
+
+/// UPSERT 的 `SET` 段：MySQL 用 `VALUES(col)` 引用「拟插入」的新值。
+const UPSERT_SET_VALUES: &str = "version = VALUES(version), checksum = VALUES(checksum), \
+     applied_via = VALUES(applied_via), applied_at = VALUES(applied_at), \
+     applied_seq = VALUES(applied_seq), execution_ms = VALUES(execution_ms), \
+     success = VALUES(success), source = VALUES(source)";
+
+/// 构造写入记录的 10 个参数（顺序与 [`RECORD_COLUMNS`] 一致）。
+fn record_values(record: &RecordWrite) -> Vec<Value> {
     let version = record
         .version
         .as_ref()
@@ -273,28 +377,18 @@ pub(crate) async fn upsert_in_tx(tx: &Transaction, record: &RecordWrite) -> Resu
         .as_ref()
         .map(|s| Value::Text(truncate_source(s)))
         .unwrap_or(Value::Null);
-
-    tx.execute_with_params(
-        &format!(
-            "INSERT INTO {MIGRATIONS_TABLE} \
-             (kind, name, version, checksum, applied_via, applied_at, applied_seq, execution_ms, success, source) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ),
-        vec![
-            Value::Text(record.kind.as_str().to_string()),
-            Value::Text(truncate_name(&record.name)),
-            version,
-            checksum,
-            Value::Text(record.applied_via.as_str().to_string()),
-            Value::I64(now_epoch_secs()),
-            Value::I64(record.seq),
-            execution_ms,
-            Value::Bool(record.is_success),
-            source,
-        ],
-    )
-    .await?;
-    Ok(())
+    vec![
+        Value::Text(record.kind.as_str().to_string()),
+        Value::Text(truncate_name(&record.name)),
+        version,
+        checksum,
+        Value::Text(record.applied_via.as_str().to_string()),
+        Value::I64(now_epoch_secs()),
+        Value::I64(record.seq),
+        execution_ms,
+        Value::Bool(record.is_success),
+        source,
+    ]
 }
 
 /// 删除一条记录（回滚用；`repair` 清理已删除的可重复 / 种子记录时复用）。
@@ -435,9 +529,9 @@ fn value_to_bool(value: &Value) -> Result<bool> {
 
 /// 迁移内容指纹（SHA-256）。
 ///
-/// 框架不引入哈希依赖，故内置标准 SHA-256（FIPS 180-4）实现；已知答案测试见
-/// 本模块单测。指纹用于发现**已应用**迁移的 `up` 脚本被改写：
-/// `down` 脚本不参与指纹（允许为已应用的单向迁移补写回退脚本）。
+/// 使用 RustCrypto `sha2`（FIPS 180-4；x86 平台走 SHA-NI 硬件加速路径，
+/// debug 构建下亦显著快于手写标量实现）。指纹用于发现**已应用**迁移的
+/// `up` 脚本被改写：`down` 脚本不参与指纹（允许为已应用的单向迁移补写回退脚本）。
 pub(crate) mod checksum {
     /// 计算内容的十六进制 SHA-256（小写）。
     ///
@@ -449,159 +543,13 @@ pub(crate) mod checksum {
             normalized.push_str(line);
             normalized.push('\n');
         }
-        hex(&sha256(normalized.as_bytes()))
+        sha256_hex(normalized.as_bytes())
     }
 
-    /// SHA-256 初始状态（FIPS 180-4 §5.3.3）。
-    const INITIAL: [u32; 8] = [
-        0x6a09_e667,
-        0xbb67_ae85,
-        0x3c6e_f372,
-        0xa54f_f53a,
-        0x510e_527f,
-        0x9b05_688c,
-        0x1f83_d9ab,
-        0x5be0_cd19,
-    ];
-
-    /// SHA-256 轮常量（FIPS 180-4 §4.2.2，前 64 个素数的立方根小数部分）。
-    const ROUND: [u32; 64] = [
-        0x428a_2f98,
-        0x7137_4491,
-        0xb5c0_fbcf,
-        0xe9b5_dba5,
-        0x3956_c25b,
-        0x59f1_11f1,
-        0x923f_82a4,
-        0xab1c_5ed5,
-        0xd807_aa98,
-        0x1283_5b01,
-        0x2431_85be,
-        0x550c_7dc3,
-        0x72be_5d74,
-        0x80de_b1fe,
-        0x9bdc_06a7,
-        0xc19b_f174,
-        0xe49b_69c1,
-        0xefbe_4786,
-        0x0fc1_9dc6,
-        0x240c_a1cc,
-        0x2de9_2c6f,
-        0x4a74_84aa,
-        0x5cb0_a9dc,
-        0x76f9_88da,
-        0x983e_5152,
-        0xa831_c66d,
-        0xb003_27c8,
-        0xbf59_7fc7,
-        0xc6e0_0bf3,
-        0xd5a7_9147,
-        0x06ca_6351,
-        0x1429_2967,
-        0x27b7_0a85,
-        0x2e1b_2138,
-        0x4d2c_6dfc,
-        0x5338_0d13,
-        0x650a_7354,
-        0x766a_0abb,
-        0x81c2_c92e,
-        0x9272_2c85,
-        0xa2bf_e8a1,
-        0xa81a_664b,
-        0xc24b_8b70,
-        0xc76c_51a3,
-        0xd192_e819,
-        0xd699_0624,
-        0xf40e_3585,
-        0x106a_a070,
-        0x19a4_c116,
-        0x1e37_6c08,
-        0x2748_774c,
-        0x34b0_bcb5,
-        0x391c_0cb3,
-        0x4ed8_aa4a,
-        0x5b9c_ca4f,
-        0x682e_6ff3,
-        0x748f_82ee,
-        0x78a5_636f,
-        0x84c8_7814,
-        0x8cc7_0208,
-        0x90be_fffa,
-        0xa450_6ceb,
-        0xbef9_a3f7,
-        0xc671_78f2,
-    ];
-
-    /// 计算 SHA-256 摘要。
-    fn sha256(data: &[u8]) -> [u8; 32] {
-        // 填充：0x80 + 若干 0，使长度 ≡ 56 (mod 64)，再附 8 字节大端位长
-        let mut padded = Vec::with_capacity(data.len() + 72);
-        padded.extend_from_slice(data);
-        padded.push(0x80);
-        while padded.len() % 64 != 56 {
-            padded.push(0);
-        }
-        padded.extend_from_slice(&((data.len() as u64).wrapping_mul(8)).to_be_bytes());
-
-        let mut state = INITIAL;
-        for block in padded.chunks_exact(64) {
-            let mut w = [0_u32; 64];
-            for (i, word) in block.chunks_exact(4).enumerate() {
-                w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
-            }
-            for i in 16..64 {
-                let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-                let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-                w[i] = w[i - 16]
-                    .wrapping_add(s0)
-                    .wrapping_add(w[i - 7])
-                    .wrapping_add(s1);
-            }
-
-            let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
-            for i in 0..64 {
-                let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-                let ch = (e & f) ^ ((!e) & g);
-                let temp1 = h
-                    .wrapping_add(s1)
-                    .wrapping_add(ch)
-                    .wrapping_add(ROUND[i])
-                    .wrapping_add(w[i]);
-                let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-                let maj = (a & b) ^ (a & c) ^ (b & c);
-                let temp2 = s0.wrapping_add(maj);
-
-                h = g;
-                g = f;
-                f = e;
-                e = d.wrapping_add(temp1);
-                d = c;
-                c = b;
-                b = a;
-                a = temp1.wrapping_add(temp2);
-            }
-
-            for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
-                *slot = slot.wrapping_add(value);
-            }
-        }
-
-        let mut digest = [0_u8; 32];
-        for (chunk, word) in digest.chunks_exact_mut(4).zip(state.iter()) {
-            chunk.copy_from_slice(&word.to_be_bytes());
-        }
-        digest
-    }
-
-    /// 十六进制编码（小写）。
-    fn hex(bytes: &[u8]) -> String {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        let mut out = String::with_capacity(bytes.len() * 2);
-        for byte in bytes {
-            out.push(HEX[usize::from(byte >> 4)] as char);
-            out.push(HEX[usize::from(byte & 0x0f)] as char);
-        }
-        out
+    /// 计算字节串的 SHA-256 并编码为小写十六进制。
+    fn sha256_hex(data: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(data))
     }
 
     #[cfg(test)]
@@ -612,17 +560,15 @@ pub(crate) mod checksum {
         #[test]
         fn sha256_matches_known_vectors() {
             assert_eq!(
-                hex(&sha256(b"")),
+                sha256_hex(b""),
                 "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
             );
             assert_eq!(
-                hex(&sha256(b"abc")),
+                sha256_hex(b"abc"),
                 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
             );
             assert_eq!(
-                hex(&sha256(
-                    b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
-                )),
+                sha256_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
                 "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
             );
         }

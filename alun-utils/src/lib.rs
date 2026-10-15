@@ -16,9 +16,9 @@ pub mod xss;
 
 pub use crypto::Crypto;
 pub use date::Date;
-pub use export::{Export, Import};
 #[cfg(feature = "xlsx")]
 pub use export::XlsxSheet;
+pub use export::{Export, Import};
 pub use mask::Mask;
 pub use serial::{
     CyclePeriod, FormatEngine, IncrementStrategy, MemorySerialBackend, SerialError,

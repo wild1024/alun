@@ -17,25 +17,25 @@ path = "src/lib.rs"
 # 门禁额外补开 `template`，否则那几块只能降级成 `ignore`。
 alun = { path = "../alun", features = ["lite", "template", "xss", "sse", "metrics", "xlsx",
                                        "chrono", "rust_decimal"] }
-alun-core = { path = "../alun-core" }
-alun-web = { path = "../alun-web", features = ["sqlite", "cache", "template", "config"] }
+alun-core = { version = "0.4.0", path = "../alun-core" }
+alun-web = { version = "0.4.0", path = "../alun-web", features = ["sqlite", "cache", "template", "config"] }
 # 文档示例覆盖金额/时间/UUID/JSON 四类生态类型，需显式开启对应 feature，
 # 否则 README 里的 Model 示例无法通过 doctest 编译。
 # `sqlite` 亦需显式声明——`db` 只是数据库能力，不含驱动。
-alun-db = { path = "../alun-db", features = ["sqlite", "chrono", "rust_decimal", "uuid", "json"] }
-alun-db-core = { path = "../alun-db-core" }
-alun-utils = { path = "../alun-utils", features = ["validator-integration"] }
-alun-cache = { path = "../alun-cache" }
-alun-config = { path = "../alun-config" }
-alun-log = { path = "../alun-log" }
-alun-plugin = { path = "../alun-plugin" }
+alun-db = { version = "0.4.0", path = "../alun-db", features = ["sqlite", "chrono", "rust_decimal", "uuid", "json"] }
+alun-db-core = { version = "0.4.0", path = "../alun-db-core" }
+alun-utils = { version = "0.4.0", path = "../alun-utils", features = ["validator-integration"] }
+alun-cache = { version = "0.4.0", path = "../alun-cache" }
+alun-config = { version = "0.4.0", path = "../alun-config" }
+alun-log = { version = "0.4.0", path = "../alun-log" }
+alun-plugin = { version = "0.4.0", path = "../alun-plugin" }
 # 不依赖 alun-kafka / 不开 alun-task 的 kafka：它们引入 rdkafka-sys，
 # 构建需要 CMake + C 工具链，会让整条文档编译链在本环境直接失败；
 # 而 alun-kafka 与 alun-task README 里的示例本来就标了 `ignore`，并不真需要这些 crate。
-alun-task = { path = "../alun-task" }
-alun-fs = { path = "../alun-fs" }
-alun-template = { path = "../alun-template" }
-alun-macros = { path = "../alun-macros" }
+alun-task = { version = "0.4.0", path = "../alun-task" }
+alun-fs = { version = "0.4.0", path = "../alun-fs" }
+alun-template = { version = "0.4.0", path = "../alun-template" }
+alun-macros = { version = "0.4.0", path = "../alun-macros" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"

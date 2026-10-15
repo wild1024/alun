@@ -340,24 +340,38 @@ mod prometheus {
     ];
 
     pub fn install(cfg: &MetricsConfig) -> alun_core::Result<()> {
+        let t_builder = std::time::Instant::now();
         let builder = PrometheusBuilder::new();
         let builder = builder
             .set_buckets(BUCKETS)
             .unwrap_or_else(|_| PrometheusBuilder::new());
         let recorder = builder.build_recorder();
+        let builder_ms = t_builder.elapsed().as_millis();
+
         let handle = recorder.handle();
         // 先落句柄再装全局：即使全局安装失败（重复安装），端点仍可渲染
         // （内容为空），不会出现"端点 404"这种更难排查的次生故障。
         let _ = HANDLE.set(handle.clone());
         let _ = ALLOW_IPS.set(cfg.allow_ips.clone());
+        let t_install = std::time::Instant::now();
         metrics::set_global_recorder(recorder)
             .map_err(|_| alun_core::Error::Config("metrics: 全局 recorder 已安装".into()))?;
+        let install_ms = t_install.elapsed().as_millis();
 
         // recorder 就位**之后**再注册元数据。`metrics` 门面的 `describe_*` 在
         // 没有 recorder 时是**静默丢弃**的（不是缓存后再补），所以顺序反了
         // 就永远拿不到 `# HELP` 行——这也是各 crate 里那个 `Once` 惰性注册
         // 只能当"兜底"、不能当主路径的原因。
+        let t_describe = std::time::Instant::now();
         describe_all();
+        let describe_ms = t_describe.elapsed().as_millis();
+
+        tracing::info!(
+            builder_ms,
+            install_ms,
+            describe_ms,
+            "metrics 初始化分解（毫秒）"
+        );
 
         // 仅在真正成为全局 recorder 时才起 upkeep：重复安装时再 spawn 一个循环
         // 只会白白多出一个常驻任务。

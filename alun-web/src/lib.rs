@@ -1,16 +1,16 @@
 //! Alun web layer: 路由、中间件、提取器、响应、全局资源
 
-pub mod app;
 /// 统一出口：响应体、API 错误、分页参数、错误码，以及「下层错误 → HTTP 语义」的映射
 pub mod api;
+pub mod app;
 #[cfg(feature = "db")]
 pub mod db_url;
 pub mod extract;
 pub mod jwt;
-pub mod middleware;
 /// F10 可观测性：HTTP 自动埋点 +（可选）Prometheus 导出端点
 #[cfg(feature = "metrics")]
 pub mod metrics;
+pub mod middleware;
 #[cfg(feature = "db")]
 pub mod page;
 pub mod plugin;
@@ -23,6 +23,10 @@ pub mod router;
 #[cfg(feature = "sse")]
 pub mod sse;
 
+pub use api::{
+    ApiError, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PageData, PageQuery, Res, ResResult, SortOrder,
+    SortQuery, codes,
+};
 pub use app::App;
 pub use extract::ValidateExt;
 pub use extract::ValidatedJson;
@@ -35,19 +39,15 @@ pub use middleware::{
     AuthClaims, AuthLayer, ClaimsBuilder, Principal, RequirePermissionLayer, RequireRoleLayer,
     TokenClaims, TokenType, UserId,
 };
-pub use api::{
-    DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, ApiError, PageData, PageQuery, Res, ResResult, SortOrder,
-    SortQuery, codes,
-};
 pub use response::ApiBody;
 pub use router::AlunRouter;
 
 #[cfg(feature = "db")]
 pub use crate::page::PageResponseExt;
-#[cfg(feature = "cache")]
-pub use crate::resources::{cache, set_cache, try_cache};
 #[cfg(all(feature = "cache", feature = "db"))]
 pub use crate::resources::cache_tenant;
+#[cfg(feature = "cache")]
+pub use crate::resources::{cache, set_cache, try_cache};
 pub use crate::resources::{cfg, config, set_config, try_config};
 #[cfg(feature = "db")]
 pub use crate::resources::{db, set_db, try_db};
@@ -106,7 +106,9 @@ inventory::collect!(NoAuthDef);
 
 /// 遍历编译期注册的全部路由注册项（由 `#[alun::get]` 等宏提交）。
 pub fn discovered_routes() -> impl Iterator<Item = fn(&mut AlunRouter)> {
-    inventory::iter::<RouteEntry>.into_iter().map(|entry| entry.0)
+    inventory::iter::<RouteEntry>
+        .into_iter()
+        .map(|entry| entry.0)
 }
 
 /// 收集编译期注册的全部权限规则（由 `#[alun::permission]` 宏提交）。

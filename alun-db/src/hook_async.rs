@@ -128,8 +128,11 @@ pub(crate) async fn dispatch_after_insert<T: Model, E: SqlExecutor>(ex: &E, row:
                 let owned = row.clone();
                 queue.push(Box::pin(async move {
                     if let Err(e) = hook.after_insert(&owned).await {
-                        tracing::warn!(model = T::TABLE, phase = "after_insert",
-                            "异步 Hook 执行失败（事务已提交，不回滚）: {e}");
+                        tracing::warn!(
+                            model = T::TABLE,
+                            phase = "after_insert",
+                            "异步 Hook 执行失败（事务已提交，不回滚）: {e}"
+                        );
                     }
                 }));
             }
@@ -156,8 +159,11 @@ pub(crate) async fn dispatch_after_update<T: Model, E: SqlExecutor>(ex: &E, row:
                 let owned = row.clone();
                 queue.push(Box::pin(async move {
                     if let Err(e) = hook.after_update(&owned).await {
-                        tracing::warn!(model = T::TABLE, phase = "after_update",
-                            "异步 Hook 执行失败（事务已提交，不回滚）: {e}");
+                        tracing::warn!(
+                            model = T::TABLE,
+                            phase = "after_update",
+                            "异步 Hook 执行失败（事务已提交，不回滚）: {e}"
+                        );
                     }
                 }));
             }
@@ -184,8 +190,11 @@ pub(crate) async fn dispatch_after_delete<T: Model, E: SqlExecutor>(ex: &E, pk: 
                 let owned = pk.clone();
                 queue.push(Box::pin(async move {
                     if let Err(e) = hook.after_delete(&owned).await {
-                        tracing::warn!(model = T::TABLE, phase = "after_delete",
-                            "异步 Hook 执行失败（事务已提交，不回滚）: {e}");
+                        tracing::warn!(
+                            model = T::TABLE,
+                            phase = "after_delete",
+                            "异步 Hook 执行失败（事务已提交，不回滚）: {e}"
+                        );
                     }
                 }));
             }

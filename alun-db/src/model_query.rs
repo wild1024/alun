@@ -302,11 +302,15 @@ impl<T: Model> ModelQuery<T> {
         let Some(field) = field else {
             return Ok(self);
         };
-        let column = allowed.iter().find(|c| **c == field).copied().ok_or_else(|| {
-            DbError::InvalidValue(format!(
-                "`{field}` is not a sortable field; allowed: {allowed:?}"
-            ))
-        })?;
+        let column = allowed
+            .iter()
+            .find(|c| **c == field)
+            .copied()
+            .ok_or_else(|| {
+                DbError::InvalidValue(format!(
+                    "`{field}` is not a sortable field; allowed: {allowed:?}"
+                ))
+            })?;
         Ok(self.order_by(OrderBy {
             expr: ColumnRef::Column(column),
             direction: if desc { Order::Desc } else { Order::Asc },
@@ -434,7 +438,8 @@ impl<T: Model> ModelQuery<T> {
     /// 自带 `#limit(...)` 的原始 SQL 会因重复分页子句而报错。
     pub async fn paginate<E: SqlExecutor>(self, ex: &E, page: u64, size: u64) -> Result<Page<T>> {
         let sql = self.into_sql(ex.sql_dialect())?;
-        let page_rows: Page<Row> = observed("select", T::TABLE, run_paginate(sql, ex, page, size)).await?;
+        let page_rows: Page<Row> =
+            observed("select", T::TABLE, run_paginate(sql, ex, page, size)).await?;
         let total = page_rows.total;
         let page_num = page_rows.page;
         let size = page_rows.size;
@@ -460,7 +465,12 @@ impl<T: Model> ModelQuery<T> {
         F: FnMut(T) -> Result<bool> + Send,
     {
         let sql = self.into_sql(ex.sql_dialect())?;
-        observed("select", T::TABLE, run_for_each(sql, ex, |row| f(T::from_row(row)?))).await
+        observed(
+            "select",
+            T::TABLE,
+            run_for_each(sql, ex, |row| f(T::from_row(row)?)),
+        )
+        .await
     }
 
     /// 按页遍历（内存占用受 `size` 约束）。回调返回 `Ok(false)` 提前结束。
@@ -473,24 +483,28 @@ impl<T: Model> ModelQuery<T> {
         F: FnMut(Page<T>) -> Result<bool> + Send,
     {
         let sql = self.into_sql(ex.sql_dialect())?;
-        observed("select", T::TABLE, run_for_each_page(sql, ex, size, |page| {
-            let total = page.total;
-            let page_num = page.page;
-            let size = page.size;
-            let pages = page.pages;
-            let list = page
-                .list
-                .into_iter()
-                .map(T::from_row)
-                .collect::<Result<Vec<T>>>()?;
-            f(Page {
-                list,
-                total,
-                page: page_num,
-                size,
-                pages,
-            })
-        }))
+        observed(
+            "select",
+            T::TABLE,
+            run_for_each_page(sql, ex, size, |page| {
+                let total = page.total;
+                let page_num = page.page;
+                let size = page.size;
+                let pages = page.pages;
+                let list = page
+                    .list
+                    .into_iter()
+                    .map(T::from_row)
+                    .collect::<Result<Vec<T>>>()?;
+                f(Page {
+                    list,
+                    total,
+                    page: page_num,
+                    size,
+                    pages,
+                })
+            }),
+        )
         .await
     }
 

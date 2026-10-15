@@ -156,6 +156,19 @@ pub fn split_statements(sql: &str, dialect: DialectKind) -> Result<Vec<String>> 
 ///
 /// 提取到的指令；未声明任何指令时返回默认值（不禁事务、默认 `;` 分隔）。
 pub fn parse_directives(sql: &str) -> Directives {
+    // 快速路径：先零分配地判断是否存在任何 `-- +` 指令行；绝大多数迁移没有，
+    // 此时直接返回默认值——省掉下方对每行做空白裁剪与小写转换的开销（迁移类
+    // 调用每次执行都要走一遍，数百行文件的开销不可忽略）。
+    let has_directive = sql.lines().any(|line| {
+        line.trim_start()
+            .strip_prefix("--")
+            .and_then(|comment| comment.trim_start().strip_prefix('+'))
+            .is_some()
+    });
+    if !has_directive {
+        return Directives::default();
+    }
+
     let mut directives = Directives::default();
     for line in sql.lines() {
         let Some(comment) = line.trim_start().strip_prefix("--") else {
@@ -165,12 +178,13 @@ pub fn parse_directives(sql: &str) -> Directives {
             continue;
         };
         let mut parts = directive.splitn(2, char::is_whitespace);
-        let name = parts.next().unwrap_or("").trim().to_ascii_lowercase();
+        let name = parts.next().unwrap_or("").trim();
         let value = parts.next().unwrap_or("").trim();
-        match name.as_str() {
-            "no-transaction" => directives.is_no_transaction = true,
-            "delimiter" if !value.is_empty() => directives.delimiter = Some(value.to_string()),
-            _ => {}
+        // 大小写不敏感且**零分配**比较（原先每行 `to_ascii_lowercase()` 会分配）。
+        if name.eq_ignore_ascii_case("no-transaction") {
+            directives.is_no_transaction = true;
+        } else if name.eq_ignore_ascii_case("delimiter") && !value.is_empty() {
+            directives.delimiter = Some(value.to_string());
         }
     }
     directives
@@ -188,6 +202,17 @@ pub fn parse_directives(sql: &str) -> Directives {
 ///
 /// 分段结果；指令注释行本身不进入任何一段。
 pub fn split_sections(sql: &str) -> Sections {
+    // 快速路径：绝大多数迁移是**单向脚本**（无 `-- +migrate` 段标记）。先做一次
+    // 零分配的行扫描；无标记时直接整段作为 up——省掉下方「逐行重建字符串」的
+    // 完整复制（原实现对所有迁移文件都付一次 O(n) 重建 + 每行 push 的开销）。
+    let has_marker = sql.lines().any(|line| migrate_marker(line).is_some());
+    if !has_marker {
+        return Sections {
+            up: sql.to_string(),
+            down: String::new(),
+        };
+    }
+
     let mut up = String::new();
     let mut down = String::new();
     let mut in_down = false;

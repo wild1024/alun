@@ -45,6 +45,39 @@
 
 ---
 
+## [0.4.0] — 2026-10-15
+
+主题：**迁移器工程化 + 启动装配热路径优化，并修掉一批「配置写了却不生效 / 值根本解不出来」的静默缺陷**。
+
+### Changed
+
+- **破坏性 · `PermissionCheckLayer.rules` 类型变更**：`Vec<PermissionRule>` → **`Arc<Vec<PermissionRule>>`**，权限层与 `App` 共享同一份规则，消除启动时「每条路由深拷贝整份规则」的热点（实测为装配耗时大头）。新增 `PermissionCheckLayer::push_rule()` 作为唯一的追加入口；直接构造该字段或用 `.rules.push(..)` 的代码需改为 `push_rule()` 或 `Arc::new(vec![..])`。
+- **破坏性 · 配置迁移 overlay 语义修正**：迁移相关配置在 profile 文件中的覆盖此前只合并 3 个字段，其余被**静默丢弃**；现改为逐字段覆盖。此前「profile 里写了却不生效」的迁移配置现在会真正生效——若曾依赖该丢弃行为，请复核配置。
+- `[database].sql_logging = true` 从此**真正生效**：此前该开关不产生效果；现在会把 `tokio_postgres` 日志级别提升到 `debug`，输出完整 SQL 与参数。
+- 迁移器 `MigratorOptions` / `LoadedMigration` 新增公开字段（均带 `Default`），以字面量全字段构造的代码需补齐。
+
+### Added
+
+- `DbExecutor::supports_script()` 与 `Transaction::{supports_script, execute_script}`：支持整段脚本的驱动可一次往返跑完一次迁移（PG 走 simple query，往返 O(2n)→O(1)）；默认实现回退 `UnsupportedFeature`。
+- 迁移器新选项 `synchronous_commit` 与 `single_transaction`（后者把整批 pending 放进同一事务，失败整批回滚）。
+- `App::migrate_embedded()` / `Migrator::source_embedded`：直接注入 `migrate!` 编译期迁移器，运行期不再依赖 `migrations/` 目录。
+- `alun_log::init_with_sql_logging()`。
+- `alun-utils/examples/hash_password.rs`：用 `Crypto::hash_password` 预生成 Argon2 口令哈希的 CLI 示例。
+
+### Fixed
+
+- **PostgreSQL `inet` / `cidr` 解码**：线格式补回缺失的长度字节，修复「所有真实 inet 值解码失败」。
+- 迁移历史记录由「先删后插」改为单条 UPSERT（PG/SQLite `ON CONFLICT`、MySQL `ON DUPLICATE`），并加内联 simple-query 快路径。
+- 迁移指纹计算由手写 SHA-256 改用 `sha2`，并加 `OnceLock` 缓存。
+- PG 连接池预热改为并发建连。
+
+### Performance
+
+- 迁移文件加载：≥8 个文件时并行读取；语句拆分器加零分配快速路径。
+- metrics recorder 与启动钩子 / 插件并行安装，并补分段耗时日志。
+
+---
+
 ## [0.3.0] — 2026-10-06
 
 首个公开的破坏性大版本。**2.0 从未提交至本仓库**，0.3.0 直接承接 2.0 的设计意图并落地。
