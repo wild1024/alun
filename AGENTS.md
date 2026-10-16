@@ -5,7 +5,7 @@
 
 ## 项目是什么
 Alun 是**面向 AI Coding 的 Rust Web 框架**：配置驱动 + 插件架构，一个接口 = 一个 `async fn` + 一个宏注解。
-版本 `0.3.0`（Edition 2024，rust-version 1.94.1），Cargo workspace 含 **21 个 crate + 5 个示例工程**。
+版本 `0.4.1`（Edition 2024，rust-version 1.94.1），Cargo workspace 含 **21 个 crate + 5 个示例工程**。
 分层：`用户代码 → alun（门面）→ 功能 crate（web / db / cache / template …）→ alun-core（纯骨架：Error / Plugin）`。
 
 设计理念承接 **[Aifei](https://github.com/jfinal/aifei)**（[官网 aifei.cn](https://aifei.cn)，世界首个 AI Coding 框架）的

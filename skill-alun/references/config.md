@@ -47,7 +47,7 @@ env 覆盖」并把 `cfg.profile` 强制写成检测到的 profile（`alun-confi
 | `middleware` | `MiddlewareConfig` | `request_id`、`request_log`、`request_log_config`、`auth`、`cors`、`compression`、`rate_limit`、`security_headers`、`permission`、`idempotency`、`nonce` |
 | `router` | `RouterConfig` | `prefix`（全局路由前缀）、`not_found`（`enabled` 默认 `true`、`message` 默认 `"请求的资源不存在"`） |
 | `plugins` | `PluginsConfig` | `enabled: Vec<String>` 名单 + `notification` / `async_task` / `scheduler` / `serial` 各插件配置 |
-| `upload` | `UploadConfig` | `path`（默认 `uploads`，启动时自动创建）、`max_size_mb`（默认 `10`） |
+| `upload` | `UploadConfig` | `path`（默认 `uploads`，启动时自动创建）、`max_size_mb`（默认 `10`；并据此推导请求体硬顶 = `max_size_mb MB + 32MiB`，框架自动装配 `DefaultBodyLimit`，业务无需自行挂载；业务侧前置校验请复用 `UploadConfig::max_request_body_bytes()`） |
 | `download` | `DownloadConfig` | `path`（默认 `downloads`，启动时自动创建） |
 | `template` | `TemplateConfig` | `path`（默认 `templates`） |
 | `static_files` | `StaticConfig` | `path`（默认 `static`）、`enabled`（默认 `false`；开启后用 `ServeDir` 兜底） |
@@ -55,7 +55,7 @@ env 覆盖」并把 `cfg.profile` 强制写成检测到的 profile（`alun-confi
 
 启动时真正被消费的字段：`server.listen`（监听地址）、`router.prefix` / `router.not_found`、
 `static_files`、`middleware.*`（中间件链，日志会打印一次摘要）、`database.*`（建池 + 可选迁移）、
-`cache.*`/`redis.*`、`template.path`、`upload.path`、`download.path`、`log.*`
+`cache.*`/`redis.*`、`template.path`、`upload.path` / `upload.max_size_mb`（请求体硬顶）、`download.path`、`log.*`
 （`alun-web/src/app.rs:550` `init_global_resources`、`build_middleware_chain`、`start`）。
 
 ## Global Access

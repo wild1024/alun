@@ -1347,6 +1347,27 @@ impl App {
             // 逐层应用耗时（debug 级：排查装配热点，函数尾部汇总输出）
             let mut layer_timings: Vec<(&'static str, u128)> = Vec::new();
 
+            // ── 请求体上限（最内层，覆盖全部路由）──
+            //
+            // axum 默认只放行 2 MiB。需要 multipart 或大 JSON 的业务一旦超出，body 流会在
+            // 读取（`field.bytes()` / `Bytes`）中途被掐断，表现为「上传失败」这类难定位的
+            // 错误。此处统一由 `[upload].max_size_mb` 推导（含 multipart 开销余量，见
+            // `UploadConfig::max_request_body_bytes`）：业务不必各自挂载，且与业务侧
+            // `Content-Length` 前置校验同源，不会出现「前置校验放行、硬顶却先掐断」的漂移。
+            //
+            // 位置任意：该层只往请求扩展里写入上限配置，与实际执行顺序无关；放在最内层
+            // 可覆盖全部路由，且外层拒绝（401 / 403 / 429）不必先解析请求体。
+            {
+                let limit = cfg.upload.max_request_body_bytes();
+                let t_apply = std::time::Instant::now();
+                router = router.layer(axum::extract::DefaultBodyLimit::max(limit));
+                layer_timings.push(("body_limit", t_apply.elapsed().as_millis()));
+                info!(
+                    "请求体上限就绪 max_request_bytes={}（由 [upload].max_size_mb={} + multipart 余量推导）",
+                    limit, cfg.upload.max_size_mb
+                );
+            }
+
             // ── 内层（先添加）：业务逻辑中间件 ──
 
             // 幂等键 / Nonce 防重放：由配置声明式接入默认链（D017），未配置时完全不改变链。
@@ -1962,6 +1983,58 @@ mod tests {
             hits.load(Ordering::SeqCst),
             1,
             "重复 nonce 不得进入 handler"
+        );
+    }
+
+    // ── 请求体上限：由 `[upload].max_size_mb` 推导并自动装配 `DefaultBodyLimit` ──
+
+    /// 上限由 `[upload].max_size_mb` 推导，且**确实替代**了 axum 内建的 2 MiB。
+    ///
+    /// 两个断言缺一不可：
+    /// - 超过推导上限 → 413（证明层已装配）；
+    /// - 3 MiB（超过 axum 内建 2 MiB、远小于推导上限）→ 200（证明生效的是推导值）。
+    ///   只断言前者时，未装配的产物靠 axum 默认限制同样会返回 413，测试无法区分。
+    #[tokio::test]
+    async fn body_limit_is_derived_from_upload_config() {
+        use axum::body::{Body, Bytes};
+        use tower::ServiceExt;
+
+        // 回显请求体长度的处理器：`Bytes` 是受 `DefaultBodyLimit` 约束的提取器
+        async fn echo_len(body: Bytes) -> String {
+            body.len().to_string()
+        }
+
+        // 发送指定字节数的裸请求体，返回响应状态
+        async fn send(router: &Router, bytes: usize) -> StatusCode {
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/alun-body-limit-echo")
+                .body(Body::from(vec![b'x'; bytes]))
+                .expect("构造请求");
+            router
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("oneshot")
+                .status()
+        }
+
+        let cfg = AppConfig::default();
+        let limit = cfg.upload.max_request_body_bytes();
+        let app = App::with_config(cfg).expect("App::with_config");
+        let router = app.build_middleware_chain(
+            Router::new().route("/api/alun-body-limit-echo", axum::routing::post(echo_len)),
+        );
+
+        assert_eq!(
+            send(&router, 3 * 1024 * 1024).await,
+            StatusCode::OK,
+            "3 MiB 在推导上限（{limit} 字节）之内必须放行；返回 413 说明仍在用 axum 内建的 2 MiB"
+        );
+        assert_eq!(
+            send(&router, limit + 1).await,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "超过推导上限（{limit} 字节）必须 413"
         );
     }
 

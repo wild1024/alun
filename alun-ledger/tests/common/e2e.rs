@@ -21,6 +21,11 @@ pub const JWT_SECRET: &str = "e2e-test-secret-0123456789abcdef";
 pub struct TestApp {
     /// 完整中间件链后的 Router。
     pub router: axum::Router,
+    /// 框架按 `[upload].max_size_mb` 推导的请求体上限（字节）。
+    ///
+    /// 取自与运行时同源的 `UploadConfig::max_request_body_bytes()`，供「超限 413」
+    /// 用例构造刚好越界的请求体，避免测试里再抄一份上限口径。
+    pub body_limit: usize,
     handle: tokio::task::JoinHandle<()>,
 }
 
@@ -81,6 +86,9 @@ pub async fn boot(d: Dialect) -> TestApp {
     cfg.middleware.idempotency.ttl_secs = 86_400;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<axum::Router>();
+    // 测试服用默认 `[upload].max_size_mb`；上限口径与运行时同源（框架据此装配
+    // DefaultBodyLimit），此处取出来供超限用例复用。
+    let body_limit = cfg.upload.max_request_body_bytes();
     let app = alun::App::with_config(cfg)
         .expect("App::with_config")
         .scan()
@@ -98,7 +106,11 @@ pub async fn boot(d: Dialect) -> TestApp {
         .await
         .expect("等待 Router 超时")
         .expect("Router 回调未触发");
-    TestApp { router, handle }
+    TestApp {
+        router,
+        body_limit,
+        handle,
+    }
 }
 
 /// 一次请求。
@@ -472,13 +484,21 @@ pub async fn run_all(d: Dialect) -> bool {
         format!("响应头应回带请求 ID，实际 {:?}", echoed.get("x-request-id")),
     );
 
-    // API-011：10MB 请求体（框架无 body-limit，观察 axum 内建限制）
-    let big = json!({"id": 9100, "name": "x".repeat(10 * 1024 * 1024), "plan": "pro"});
+    // API-011：请求体超过框架按 `[upload].max_size_mb` 推导的上限 → 413。
+    //
+    // 上限口径由框架统一提供（`UploadConfig::max_request_body_bytes`，装配为
+    // `DefaultBodyLimit`），故此处直接取运行时同源值构造「刚好越界」的请求体：
+    // 不再依赖 axum 内建的 2 MiB 限制，也避免测试里再抄一份上限公式。
+    let big = json!({
+        "id": 9100,
+        "name": "x".repeat(app.body_limit + 1024),
+        "plan": "pro",
+    });
     let (st, _, _) = call(&app, "POST", "/api/tenants", Some(&t1), Some(big)).await;
     all_ok &= check(
         "API-011",
         st == StatusCode::PAYLOAD_TOO_LARGE,
-        format!("{st}"),
+        format!("{st}（框架请求体上限 {} 字节）", app.body_limit),
     );
 
     // API-006：未知路径 404

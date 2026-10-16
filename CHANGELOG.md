@@ -12,6 +12,12 @@
 
 ## [Unreleased]
 
+（暂无）
+
+---
+
+## [0.4.1] — 2026-10-15
+
 主题：**自定义中间件的粒度与身份可见性**（让「中间件放哪」这件事从隐式契约变成显式 API）。
 
 ### Added
@@ -26,6 +32,7 @@
 - **`AlunRouter::merge_with_layer(prefix, sub, wrap)`**：子树级 layer（只给某前缀下的整组路由挂）。
 - **`#[alun::layer(L)]`**：路由级 layer 属性宏，写在路由注解**上方**；会摘掉该路由的编译期自注册、改生成「带 layer 的注册」，因此不会重复挂载。
 - `AlunRouter::add_route_with_layer`（未知动词回退 `any`）。
+- **请求体上限自动装配**：`UploadConfig::max_request_body_bytes()`（= `max_size_mb` × 1 MiB + 32 MiB multipart 分帧余量），`App::start()` / `App::into_router()` 会据此自动挂载 `DefaultBodyLimit` 并在启动日志打印生效值，业务侧无需再手写请求体上限中间件。
 
 ### Changed
 

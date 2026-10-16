@@ -158,9 +158,20 @@ pub async fn clean_business_data(db: &Db) {
     ] {
         let _ = db.execute(&format!("DELETE FROM {table}")).await;
     }
-    // 迁移用例会临时插入非 1..27 的版本行（如 9001），避免污染后续版本集合断言
+    // 迁移用例会临时插入非 1..27 的版本行（如 9001），避免污染后续版本集合断言。
+    //
+    // 不能用 `version > 27`：`version` 列是 `VARCHAR`，与整数字面量比较时 SQLite /
+    // PG 会把 `27` 折成文本走**字典序**（`'3' > '27'` 成立），于是真实版本 3..9
+    // 被当成「超出清单」删掉 —— 文件库第二次运行时这几条已应用的迁移又被判成待应用，
+    // 重放 `ALTER TABLE ... ADD COLUMN` 直接报 duplicate column。故按集合精确判定。
+    let real_versions = (1..=27)
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let _ = db
-        .execute("DELETE FROM schema_migrations WHERE version > 27")
+        .execute(&format!(
+            "DELETE FROM schema_migrations WHERE version NOT IN ({real_versions})"
+        ))
         .await;
 }
 

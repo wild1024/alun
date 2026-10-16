@@ -139,6 +139,8 @@ enabled = false              # 仅控制配置文件里的 rules；#[alun::permi
 # ]
 
 # ==================== 上传 / 下载 ====================
+# max_size_mb 同时决定请求体硬顶：框架自动挂载 DefaultBodyLimit =
+# max_size_mb MB + 32MiB（multipart 分帧 / 多字段余量），业务无需自行挂载。
 [upload]
 path = "uploads"
 max_size_mb = 10

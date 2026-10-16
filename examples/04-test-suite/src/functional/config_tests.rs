@@ -98,6 +98,12 @@ mod tests {
         let cfg = AppConfig::default();
         assert_eq!(cfg.upload.path, "uploads");
         assert_eq!(cfg.upload.max_size_mb, 10);
+        // 派生请求体上限（框架据此装配 `DefaultBodyLimit`）与业务前置校验同源，
+        // 公式一旦被改动即为破坏性变更，故在此钉住：10 MiB + 32 MiB multipart 余量。
+        assert_eq!(
+            cfg.upload.max_request_body_bytes(),
+            10 * 1024 * 1024 + 32 * 1024 * 1024
+        );
     }
 
     #[test]

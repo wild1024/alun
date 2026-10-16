@@ -35,7 +35,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["alun contributors"]
@@ -84,26 +84,26 @@ metrics-exporter-prometheus = { version = "0.18", default-features = false }
 rust_xlsxwriter = "0.99"
 calamine = "0.36"
 
-alun-core = { version = "0.4.0", path = "alun-core" }
-alun-macros = { version = "0.4.0", path = "alun-macros" }
-alun-web = { version = "0.4.0", path = "alun-web" }
-alun-db = { version = "0.4.0", path = "alun-db", default-features = false }
-alun-db-core = { version = "0.4.0", path = "alun-db-core" }
-alun-db-sql = { version = "0.4.0", path = "alun-db-sql" }
-alun-db-macro = { version = "0.4.0", path = "alun-db-macro" }
-alun-db-build = { version = "0.4.0", path = "alun-db-build" }
-alun-db-driver-sqlite = { version = "0.4.0", path = "alun-db-driver-sqlite" }
-alun-db-driver-postgres = { version = "0.4.0", path = "alun-db-driver-postgres" }
-alun-db-driver-mysql = { version = "0.4.0", path = "alun-db-driver-mysql" }
-alun-template = { version = "0.4.0", path = "alun-template" }
-alun-cache = { version = "0.4.0", path = "alun-cache" }
-alun-config = { version = "0.4.0", path = "alun-config" }
-alun-log = { version = "0.4.0", path = "alun-log" }
-alun-utils = { version = "0.4.0", path = "alun-utils" }
-alun-plugin = { version = "0.4.0", path = "alun-plugin" }
-alun-kafka = { version = "0.4.0", path = "alun-kafka" }
-alun-task = { version = "0.4.0", path = "alun-task", default-features = false }
-alun-fs = { version = "0.4.0", path = "alun-fs", default-features = false }
+alun-core = { version = "0.4.1", path = "alun-core" }
+alun-macros = { version = "0.4.1", path = "alun-macros" }
+alun-web = { version = "0.4.1", path = "alun-web" }
+alun-db = { version = "0.4.1", path = "alun-db", default-features = false }
+alun-db-core = { version = "0.4.1", path = "alun-db-core" }
+alun-db-sql = { version = "0.4.1", path = "alun-db-sql" }
+alun-db-macro = { version = "0.4.1", path = "alun-db-macro" }
+alun-db-build = { version = "0.4.1", path = "alun-db-build" }
+alun-db-driver-sqlite = { version = "0.4.1", path = "alun-db-driver-sqlite" }
+alun-db-driver-postgres = { version = "0.4.1", path = "alun-db-driver-postgres" }
+alun-db-driver-mysql = { version = "0.4.1", path = "alun-db-driver-mysql" }
+alun-template = { version = "0.4.1", path = "alun-template" }
+alun-cache = { version = "0.4.1", path = "alun-cache" }
+alun-config = { version = "0.4.1", path = "alun-config" }
+alun-log = { version = "0.4.1", path = "alun-log" }
+alun-utils = { version = "0.4.1", path = "alun-utils" }
+alun-plugin = { version = "0.4.1", path = "alun-plugin" }
+alun-kafka = { version = "0.4.1", path = "alun-kafka" }
+alun-task = { version = "0.4.1", path = "alun-task", default-features = false }
+alun-fs = { version = "0.4.1", path = "alun-fs", default-features = false }
 
 # ── 构建提速：测试与依赖不带完整 debuginfo ──
 #

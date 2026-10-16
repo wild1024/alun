@@ -1003,7 +1003,10 @@
 //!
 //! 需要 `features = ["task"]`。Kafka 驱动的分布式任务，支持重试和死信队列。
 //!
-//! ```rust,no_run
+//! 该示例依赖非默认 feature（`alun_task` 仅在 `task` 下再导出、宏展开也引用它），
+//! 故按文档约定用 `ignore` 只作示意，不参与默认 feature 下的 doctest 编译。
+//!
+//! ```rust,ignore
 //! use alun::alun_task::TaskHandler;
 //! use serde_json::{json, Value};
 //!

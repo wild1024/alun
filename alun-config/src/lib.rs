@@ -727,6 +727,37 @@ pub struct UploadConfig {
     pub max_size_mb: u64,
 }
 
+/// multipart 请求体的**分帧与多字段开销**余量（字节）。
+///
+/// 单个体积上限由 [`UploadConfig::max_size_mb`] 决定，而一次 multipart 请求除文件
+/// 本体外还携带分段边界、字段名等帧开销，且可能一次提交多个文件。若请求体硬顶只按
+/// 单文件上限设置，合法的多文件请求会在读取 `field.bytes()` 时被 axum 中途掐断
+/// body 流，表现为「上传失败」这类难以定位的问题。
+///
+/// 取 32 MiB 与既有业务项目的口径一致——框架与业务共用同一常量，避免两处漂移。
+const MULTIPART_BODY_OVERHEAD_BYTES: u64 = 32 * 1024 * 1024;
+
+impl UploadConfig {
+    /// 请求体上限（字节）：由 [`UploadConfig::max_size_mb`] 推导，并计入 multipart 开销余量。
+    ///
+    /// 框架据此装配 `axum::extract::DefaultBodyLimit`；业务侧做 `Content-Length`
+    /// **前置**校验时也应复用本方法——两处必须是同一个数，否则硬顶会先于前置校验掐断
+    /// 请求，错误体退化为 axum 的纯文本 413（前端统一拦截器无法解析）。
+    ///
+    /// # 返回值
+    ///
+    /// `max_size_mb × 1MiB + 32MiB`。极端配置下溢出饱和为 `usize::MAX`
+    /// （等价于不限制请求体，此时请由反向代理设置硬顶）。
+    pub fn max_request_body_bytes(&self) -> usize {
+        let bytes = self
+            .max_size_mb
+            .saturating_mul(1024 * 1024)
+            .saturating_add(MULTIPART_BODY_OVERHEAD_BYTES);
+        // 32 位平台上 usize 装不下时饱和到 MAX：直接用 `as` 截断会得到任意小值
+        usize::try_from(bytes).unwrap_or(usize::MAX)
+    }
+}
+
 /// 下载配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadConfig {

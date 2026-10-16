@@ -73,6 +73,14 @@ last_reviewed: 2026-10-06
 | `path`        | `String` | `"uploads"` | 上传文件存储目录   |
 | `max_size_mb` | `u64`    | `10`        | 最大文件大小（MB） |
 
+> **请求体上限（自动装配）**：框架在建链时按 `max_size_mb × 1MiB + 32MiB` 计算请求体上限
+> （32 MiB 为 multipart 分帧 / 多字段开销余量），并自动挂载 `axum::extract::DefaultBodyLimit`，
+> 业务代码无需再自行挂载。axum 默认只放行 2 MiB，超出时 multipart / 大 JSON 的 body 流会在
+> 读取途中被掐断（表现为「上传失败」这类难定位的错误）。
+>
+> 业务侧若需按 `Content-Length` 提前拒绝，请调用 `UploadConfig::max_request_body_bytes()` 取同一口径，
+> 不要另写公式——硬顶与前置校验必须同源，否则前置校验形同虚设。
+
 `DownloadConfig`：
 
 | 字段     | 类型       | 默认值           | 说明       |

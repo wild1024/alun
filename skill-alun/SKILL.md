@@ -373,6 +373,7 @@ tenant_scope(TenantContext::Cross, async {
 Execution order (outermost first): SecurityHeaders → CORS → RequestLog → RequestId → Auth → PermissionCheck → RateLimit → Compression → Nonce → Idempotency → handler
 （Auth 在 RateLimit 外层：未认证请求先得 401、不消耗限流额度；已按源码 layer 添加顺序实测确认）
 （按配置开关挂载；Idempotency / Nonce 需 `cache` feature + 对应 `[middleware.*]` 段；Auth 与 PermissionCheck 分别是 `AuthLayer` 与 `PermissionCheckLayer`）
+（请求体上限由 `[upload].max_size_mb` 自动推导（`+32 MiB` multipart 余量）并装配为 `axum::extract::DefaultBodyLimit`，**不要**在业务里再挂一层；需按 `Content-Length` 前置拒绝时复用 `UploadConfig::max_request_body_bytes()` 取同一口径）
 
 ## Configuration System → see `references/config.md`
 
