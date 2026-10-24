@@ -171,6 +171,12 @@ cargo test --workspace              # 完整门禁（CI 用）
 
 Rust 1.94.1（Edition 2024）· Tokio · Axum · SQLx 风格自研 ORM · `inventory` 编译期注册 · minijinja · `tracing`
 
+## 联系方式
+
+技术交流、问题反馈或商务合作，欢迎扫码添加微信：
+
+<img src="docs/images/wechat-qrcode.jpg" alt="微信二维码" width="180" />
+
 ## License
 
 MIT
