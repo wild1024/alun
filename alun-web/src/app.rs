@@ -835,6 +835,25 @@ impl App {
             println!("{}", toml_str);
         }
 
+        // 1.0. F10：提前**并行**初始化 Prometheus recorder。
+        //      `build_recorder` 内的 quanta 首次校准最长可占 200ms（本机实测
+        //      1ms ↔ 208ms 双峰），而它与数据库连接 / 迁移 / 启动钩子没有依赖。
+        //      在初始化全局资源**之前** spawn，可将这段固定开销藏进数据库握手
+        //      与迁移耗时里；真正需要端点就绪时再 await（见 2.5）。
+        #[cfg(feature = "metrics-prometheus")]
+        let metrics_task = self
+            .config_mgr
+            .as_ref()
+            .map(|cm| cm.get().metrics.clone())
+            .filter(|mc| mc.enabled)
+            .map(|mc| {
+                let task_cfg = mc.clone();
+                (
+                    mc,
+                    tokio::spawn(async move { crate::metrics::install_prometheus(&task_cfg) }),
+                )
+            });
+
         // 1. 先初始化全局资源（数据库、缓存、配置、模板）
         //    编译期嵌入的迁移器（`migrate_embedded` 注入）随初始化一并传入。
         #[cfg(feature = "db")]
@@ -883,23 +902,6 @@ impl App {
             }
         }
 
-        // 1.4. F10：提前**并行**初始化 Prometheus recorder——builder 段开销偶发
-        //      ~200ms（本机实测 1ms ↔ 208ms 双峰），与启动钩子 / 插件启动并行
-        //      执行可将它藏进启动流程；提前安装也让启动期埋点被更完整采集。
-        #[cfg(feature = "metrics-prometheus")]
-        let metrics_task = self
-            .config_mgr
-            .as_ref()
-            .map(|cm| cm.get().metrics.clone())
-            .filter(|mc| mc.enabled)
-            .map(|mc| {
-                let task_cfg = mc.clone();
-                (
-                    mc,
-                    tokio::spawn(async move { crate::metrics::install_prometheus(&task_cfg) }),
-                )
-            });
-
         // 1.5. 执行自定义启动钩子（可初始化自定义全局资源）
         //      按注册顺序执行；多模块各自注册时互不覆盖。
         let startup_hooks = std::mem::take(&mut self.startup_hooks);
@@ -924,30 +926,49 @@ impl App {
             "插件启动完成"
         );
 
-        // 2.5. F10：等待 Prometheus recorder 就绪（初始化已在 1.4 与启动流程并行）。
+        // 2.5. F10：Prometheus recorder 就绪处理（初始化已在 1.0 与启动流程并行）。
         #[cfg(feature = "metrics-prometheus")]
         if let Some((mc, task)) = metrics_task {
-            let wait_started = Instant::now();
-            match task.await {
-                Ok(Ok(())) => {
-                    let scope = if mc.allow_ips.is_empty() {
-                        "仅本机回环（[metrics].allow_ips 为空）".to_string()
-                    } else {
-                        format!("白名单 {}", mc.allow_ips.join(", "))
-                    };
-                    info!(
-                        "指标端点已启用 path={} 访问范围：{}（等待就绪 {}ms，初始化与启动钩子并行）",
-                        mc.path,
-                        scope,
-                        wait_started.elapsed().as_millis()
-                    );
+            if mc.blocking_startup {
+                let wait_started = Instant::now();
+                match task.await {
+                    Ok(Ok(())) => {
+                        let scope = if mc.allow_ips.is_empty() {
+                            "仅本机回环（[metrics].allow_ips 为空）".to_string()
+                        } else {
+                            format!("白名单 {}", mc.allow_ips.join(", "))
+                        };
+                        info!(
+                            "指标端点已启用 path={} 访问范围：{}（等待就绪 {}ms，初始化与资源装配并行）",
+                            mc.path,
+                            scope,
+                            wait_started.elapsed().as_millis()
+                        );
+                    }
+                    Ok(Err(e)) => return Err(e),
+                    Err(join_err) => {
+                        return Err(alun_core::Error::Config(format!(
+                            "metrics 初始化任务异常退出: {join_err}"
+                        )));
+                    }
                 }
-                Ok(Err(e)) => return Err(e),
-                Err(join_err) => {
-                    return Err(alun_core::Error::Config(format!(
-                        "metrics 初始化任务异常退出: {join_err}"
-                    )));
-                }
+            } else {
+                // 非阻塞模式：初始化继续在后台完成，监听不等待。
+                // 安装完成前 `/metrics` 返回 404；安装失败只记日志（端点保持不可用）。
+                tokio::spawn(async move {
+                    match task.await {
+                        Ok(Ok(())) => info!(
+                            "指标端点后台就绪 path={}（未阻塞启动，安装前的指标不采集）",
+                            mc.path
+                        ),
+                        Ok(Err(e)) => {
+                            tracing::error!(error = %e, "指标端点后台初始化失败，/metrics 将保持 404")
+                        }
+                        Err(join_err) => {
+                            tracing::error!(error = %join_err, "metrics 初始化任务异常退出")
+                        }
+                    }
+                });
             }
         }
 

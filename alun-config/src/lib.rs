@@ -372,6 +372,14 @@ pub struct MetricsConfig {
     /// 关闭后只保留 DB / 缓存 / 多租户安全指标。
     #[serde(default = "default_true")]
     pub http: bool,
+
+    /// 启动时是否等待 recorder 就绪（默认 `true`）。
+    ///
+    /// recorder 构建包含 `quanta` 首次时钟校准（上限 200ms）。置 `false` 后
+    /// 初始化转入后台，启动不再等待；代价是进程刚启动的极短时间内 `/metrics`
+    /// 可能返回 404，且启动期（安装完成前）的指标不会被采集。
+    #[serde(default = "default_true")]
+    pub blocking_startup: bool,
 }
 
 /// 幂等键配置（`[middleware.idempotency]`）
@@ -1160,6 +1168,7 @@ impl Default for MetricsConfig {
             path: default_metrics_path(),
             allow_ips: Vec::new(),
             http: true,
+            blocking_startup: true,
         }
     }
 }
@@ -1463,6 +1472,9 @@ fn merge_configs(base: &mut AppConfig, overlay: &AppConfig) {
     }
     if !overlay.metrics.http {
         base.metrics.http = false;
+    }
+    if !overlay.metrics.blocking_startup {
+        base.metrics.blocking_startup = false;
     }
 
     // 插件采用完全替换（数组无法字段级合并）

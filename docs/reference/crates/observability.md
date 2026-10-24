@@ -29,15 +29,17 @@ last_reviewed: 2026-10-06
 | `[metrics].path` | 同上 | 绝对路径，**不拼** `[router].prefix` |
 | `[metrics].allow_ips` | 同上 | 空 = 仅本机回环；抓取器在外网必须显式列出 IP |
 | `[metrics].http` | 同上 | 是否埋 HTTP 层；关掉只留 DB / 缓存 / 安全指标 |
+| `[metrics].blocking_startup` | 同上 | 默认 `true`：启动等待 recorder 就绪（含 quanta 首次校准，最长 200ms）。置 `false` 后初始化转后台，启动不再等待，代价是启动初期 `/metrics` 短暂 404 且安装前指标不采集 |
 | `install_prometheus(cfg)` | `alun_web::metrics` | 建 handle → 装全局 recorder → 起 upkeep → 注册 `describe_*` |
 
 ```toml
 # config/config.toml
 [metrics]
-enabled   = true
-path      = "/metrics"
-allow_ips = ["10.0.0.9"]   # 空 = 仅回环
-http      = true
+enabled          = true
+path             = "/metrics"
+allow_ips        = ["10.0.0.9"]   # 空 = 仅回环
+http             = true
+blocking_startup = false          # 不阻塞启动；默认 true
 ```
 
 自动产出的指标（业务零改动）：

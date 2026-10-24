@@ -16,6 +16,21 @@
 
 ---
 
+## [0.4.2] — 2026-10-24
+
+主题：**启动时延**（把与业务无关的固定开销从启动关键路径上挪走）。
+
+### Changed
+
+- **Prometheus 初始化提前到资源装配之前**：`[metrics].enabled = true` 时，recorder 构建（`quanta` 首次校准，最长可占 200ms）现在与数据库连接 / 迁移 / 启动钩子并行，而不是只与启动钩子并行。启动阶段不再为此单独等待，实测 release 启动 350ms → 206ms（本机 PG 本机连接）；端点仍在使用前完成安装，安装失败仍中止启动。
+- **迁移器新增「无待应用迁移」快路径**：记录表已存在时，`Migrator::run` 只读一次历史 + 校验指纹就返回，不再获取咨询锁、执行 `CREATE TABLE IF NOT EXISTS`、探测索引或重复读取历史。`import_legacy` / `baseline_on_migrate` 仍走完整路径；有 pending 时持锁后重新读历史，避免并发实例竞态。实测 0 待迁移的启动检查 ~16ms → ~9ms（含 40 个迁移文件的读取与指纹校验）。
+
+### Added
+
+- **`[metrics].blocking_startup`**（默认 `true`）：置 `false` 后 Prometheus recorder 初始化转入后台，启动不再等待 quanta 校准；代价是启动初期 `/metrics` 短暂 404、安装前的指标不采集。cailu-pro 已启用该模式，release 启动再降至 ~160ms。
+
+---
+
 ## [0.4.1] — 2026-10-15
 
 主题：**自定义中间件的粒度与身份可见性**（让「中间件放哪」这件事从隐式契约变成显式 API）。

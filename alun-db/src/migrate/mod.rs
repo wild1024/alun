@@ -78,6 +78,7 @@ mod version;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use alun_db_core::error::{DbError, Result};
 
@@ -438,7 +439,43 @@ impl Migrator {
     /// 来源加载失败、版本 / 名称冲突、拿不到迁移互斥锁、指纹校验失败、
     /// 建表失败或任一迁移执行失败时返回 [`DbError`]。
     pub async fn run(&self, db: &Db) -> Result<usize> {
+        let started = Instant::now();
         let list = self.load()?;
+        let load_ms = started.elapsed().as_millis();
+
+        // 稳态快路径：记录表已存在且没有待应用迁移时，只读一次历史 + 校验指纹即可
+        // 返回。不获取咨询锁、不做 CREATE TABLE / 索引探测、不重复读取历史——
+        // 启动期最常见的「应用 0 个迁移」不再付出 4~6 次额外往返。
+        //
+        // `import_legacy` / `baseline_on_migrate` 会写记录表，必须走完整路径；
+        // 有 pending 时同样走完整路径（在那里持锁后重新读历史，避免并发实例竞态）。
+        if !self.options.import_legacy && !self.options.baseline_on_migrate {
+            let history_started = Instant::now();
+            match history::load_applied(db).await {
+                Ok(applied) => {
+                    let history_ms = history_started.elapsed().as_millis();
+                    if !list.iter().any(|m| needs_apply(m, &applied)) {
+                        // 无待应用迁移：仍需校验已应用迁移的指纹（内容被改写必须中止）
+                        let verify_started = Instant::now();
+                        self.verify_checksums(db, &list, &applied).await?;
+                        let verify_ms = verify_started.elapsed().as_millis();
+                        tracing::debug!(
+                            migrations = list.len(),
+                            load_ms,
+                            history_ms,
+                            verify_ms,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            "无待应用迁移，跳过迁移锁与建表探测"
+                        );
+                        return Ok(0);
+                    }
+                }
+                // 记录表不存在（裸库）：交给完整路径建表并应用
+                Err(e) if history::is_missing_table(&e) => {}
+                Err(e) => return Err(e),
+            }
+        }
+
         self.apply_with_lock(db, list).await
     }
 
@@ -812,25 +849,19 @@ impl Migrator {
         // 省去每迁移一次 BEGIN / COMMIT 往返；否则逐条应用（失败隔离、断点续跑）。
         let mut pending: Vec<(&LoadedMigration, i64, String)> = Vec::new();
         for migration in list {
-            if migration.kind == MigrationKind::Baseline {
-                // 基线只写标记，不执行 SQL（其内容已在加载期校验为空）
+            if !needs_apply(migration, &applied) {
                 continue;
             }
             let checksum = migration.checksum().to_string();
             let key = (migration.kind, migration.name.clone());
+            // 记录重跑原因，便于排查「为什么每次都执行」
             match applied.get(&key) {
                 Some(record) if record.is_success => {
-                    if migration.kind.is_rerunnable()
-                        && record.checksum.as_deref() != Some(&checksum)
-                    {
-                        tracing::info!(
-                            migration = %migration.name,
-                            kind = %migration.kind,
-                            "可重复迁移内容已变化，重新执行"
-                        );
-                    } else {
-                        continue;
-                    }
+                    tracing::info!(
+                        migration = %migration.name,
+                        kind = %migration.kind,
+                        "可重复迁移内容已变化，重新执行"
+                    );
                 }
                 Some(_) => {
                     // 上次失败的记录：重跑（失败行不视为已应用）
@@ -1221,6 +1252,28 @@ fn latest_success(applied: &history::AppliedMap) -> Option<&history::AppliedReco
         .max_by_key(|record| record.seq)
 }
 
+/// 该迁移在本次运行中是否需要执行。
+///
+/// 与 [`Migrator::apply`] 的待应用判定共用同一份规则（启动快路径与正式执行
+/// 不允许出现两套口径）：
+///
+/// - 基线只写标记、不执行 SQL；
+/// - 已成功记录默认跳过；可重复 / 种子迁移内容变化时重跑；
+/// - 上次失败的记录重跑；记录表里没有的迁移是新迁移。
+fn needs_apply(migration: &LoadedMigration, applied: &history::AppliedMap) -> bool {
+    if migration.kind == MigrationKind::Baseline {
+        return false;
+    }
+    match applied.get(&(migration.kind, migration.name.clone())) {
+        Some(record) if record.is_success => {
+            migration.kind.is_rerunnable()
+                && record.checksum.as_deref() != Some(migration.checksum())
+        }
+        Some(_) => true,
+        None => true,
+    }
+}
+
 /// 已成功应用的版本化迁移中的最大版本号（乱序补迁判定用）。
 ///
 /// 只看 [`MigrationKind::Versioned`]：基线标记的版本不参与比较，否则一次
@@ -1369,6 +1422,70 @@ mod tests {
             loaded(MigrationKind::Versioned, "product", "2"),
         ];
         check_identity_conflicts(&list).expect("unique names must pass");
+    }
+
+    /// 构造一条已应用记录（供待应用判定测试）。
+    fn record(
+        migration: &LoadedMigration,
+        checksum: Option<String>,
+        is_success: bool,
+    ) -> history::AppliedRecord {
+        history::AppliedRecord {
+            kind: migration.kind,
+            name: migration.name.clone(),
+            version: migration.version.clone(),
+            checksum,
+            applied_via: AppliedVia::Executed,
+            seq: 1,
+            is_success,
+        }
+    }
+
+    /// 快路径与执行路径共用的待应用判定：
+    /// 基线跳过；成功记录跳过（可重复迁移内容变化时重跑）；失败 / 缺失记录重跑。
+    #[test]
+    fn needs_apply_matches_record_state() {
+        let versioned = loaded(MigrationKind::Versioned, "create_widgets", "1");
+        let seed = LoadedMigration {
+            version: None,
+            up: "INSERT INTO demo VALUES (1);".to_string(),
+            ..loaded(MigrationKind::Seed, "dict_data", "")
+        };
+        let baseline = loaded(MigrationKind::Baseline, "base_1", "1");
+
+        let empty = history::AppliedMap::new();
+        assert!(!needs_apply(&baseline, &empty), "基线只写标记，不执行 SQL");
+        assert!(needs_apply(&versioned, &empty), "记录缺失 → 执行");
+        assert!(needs_apply(&seed, &empty), "记录缺失 → 执行");
+
+        // 版本化成功记录：指纹差异由 verify_checksums 中止启动，不在这里重跑
+        let mut applied = history::AppliedMap::new();
+        applied.insert(
+            (versioned.kind, versioned.name.clone()),
+            record(&versioned, Some("different".into()), true),
+        );
+        assert!(!needs_apply(&versioned, &applied));
+
+        // 可重复 / 种子：指纹一致跳过，变化重跑
+        let mut applied = history::AppliedMap::new();
+        applied.insert(
+            (seed.kind, seed.name.clone()),
+            record(&seed, Some(seed.checksum().to_string()), true),
+        );
+        assert!(!needs_apply(&seed, &applied));
+        applied.insert(
+            (seed.kind, seed.name.clone()),
+            record(&seed, Some("different".into()), true),
+        );
+        assert!(needs_apply(&seed, &applied));
+
+        // 上次失败（success = false）→ 重跑
+        let mut applied = history::AppliedMap::new();
+        applied.insert(
+            (versioned.kind, versioned.name.clone()),
+            record(&versioned, None, false),
+        );
+        assert!(needs_apply(&versioned, &applied));
     }
 
     /// 默认选项符合第一期约定（拆分开、分段开、事务开、强校验）。
